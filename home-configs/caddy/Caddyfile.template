@@ -1,0 +1,225 @@
+# Home Caddy Configuration - Dual-Path Setup
+# This configuration handles both external (via Azure/WireGuard) and local network traffic
+#
+# TRAFFIC PATHS:
+# 1. External: Internet → Azure Caddy (HTTPS) → WireGuard Tunnel → This Caddy (HTTP:80) → Services
+# 2. Local: Home Network → This Caddy (HTTPS:443) → Services
+#
+# SPLIT DNS SETUP (Recommended):
+# - Internal DNS (Pi-hole, AdGuard, router): *.svc.{{DOMAIN_NAME}} → This server's local IP
+# - External DNS (deSEC): *.svc.{{DOMAIN_NAME}} → Azure VM IP
+# - Same URLs work everywhere with appropriate routing
+
+# ============================================================================
+# Global Options
+# ============================================================================
+{
+	# Admin interface disabled for security
+	admin off
+
+	servers {
+		trusted_proxies static {{WIREGUARD_SERVER_IP}}
+	}
+	# Email for Let's Encrypt (if using automatic HTTPS)
+	# email your-email@example.com
+}
+
+# ============================================================================
+# Port 80 - Azure/WireGuard Tunnel Traffic (External Access)
+# ============================================================================
+# Traffic from Azure arrives here already decrypted (HTTPS terminated at Azure)
+# Source IP will be the WireGuard server: {{WIREGUARD_SERVER_IP}}
+
+:80 {
+	# Only accept connections from Azure WireGuard IP
+	@from_azure {
+		remote_ip 10.0.0.1
+	}
+
+	# Only process *. domains
+	@svc_domain_reject {
+		not host *.{{DOMAIN_NAME}}
+	}
+	respond @svc_domain_reject "Forbidden" 403
+
+	# Deny everything not from Azure
+	@not_from_azure {
+		not remote_ip 10.0.0.1
+	}
+	respond @not_from_azure "Forbidden" 403
+
+	@jellyfin host jellyfin.{{DOMAIN_NAME}}
+	handle @jellyfin {
+		reverse_proxy http://jellyfin:8096
+	}
+
+	# ────────────────────────────────────────────────────────────
+	# Default Handler - Reject Unknown Services
+	# ────────────────────────────────────────────────────────────
+	handle {
+		respond "Service Not Available" 404
+	}
+
+	# Security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Logging
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}
+
+# ============================================================================
+# Port 443 - Local Network Traffic (HTTPS)
+# ============================================================================
+# Direct connections from devices on your home network
+# Requires wildcard certificate: *.{{DOMAIN_NAME}}
+
+*.{{DOMAIN_NAME}} {
+	# Use wildcard certificate
+	tls /certs/cert.pem /certs/key.pem
+
+	# Only accept connections from local network
+	@local_network {
+		remote_ip 192.168.0.0/16
+	}
+
+	# Deny everything not from local network
+	@not_local {
+		not remote_ip 192.168.0.0/16
+	}
+	respond @not_local "Forbidden" 403
+
+	# ────────────────────────────────────────────────────────────
+	# Media Services
+	# ────────────────────────────────────────────────────────────
+
+	# Jellyfin - Media Server
+	@jellyfin host jellyfin.{{DOMAIN_NAME}}
+	handle @jellyfin {
+		reverse_proxy http://jellyfin:8096
+	}
+
+	# Plex - Media Server (alternative)
+	# @plex host plex.{{DOMAIN_NAME}}
+	# handle @plex {
+	# 	reverse_proxy http://plex:32400
+	# }
+
+	# ────────────────────────────────────────────────────────────
+	# Media Management
+	# ────────────────────────────────────────────────────────────
+
+	# Sonarr - TV Show Management
+	@sonarr host sonarr.{{DOMAIN_NAME}}
+	handle @sonarr {
+		reverse_proxy http://sonarr:8989
+	}
+
+	# Radarr - Movie Management
+	@radarr host radarr.{{DOMAIN_NAME}}
+	handle @radarr {
+		reverse_proxy http://radarr:7878
+	}
+
+	# Lidarr - Music Management
+	# @lidarr host lidarr.{{DOMAIN_NAME}}
+	# handle @lidarr {
+	# 	reverse_proxy http://lidarr:8686
+	# }
+
+	# Bazarr - Subtitle Management
+	# @bazarr host bazarr.{{DOMAIN_NAME}}
+	# handle @bazarr {
+	# 	reverse_proxy http://bazarr:6767
+	# }
+
+	# ────────────────────────────────────────────────────────────
+	# Download Clients
+	# ────────────────────────────────────────────────────────────
+
+	# qBittorrent - Torrent Client
+	# @qbittorrent host qbittorrent.{{DOMAIN_NAME}}
+	# handle @qbittorrent {
+	# 	reverse_proxy http://qbittorrent:8080
+	# }
+
+	# NZBGet - Usenet Client
+	# @nzbget host nzbget.{{DOMAIN_NAME}}
+	# handle @nzbget {
+	# 	reverse_proxy http://nzbget:6789
+	# }
+
+	# SABnzbd - Usenet Client (alternative)
+	# @sabnzbd host sabnzbd.{{DOMAIN_NAME}}
+	# handle @sabnzbd {
+	# 	reverse_proxy http://sabnzbd:8080
+	# }
+
+	# ────────────────────────────────────────────────────────────
+	# Other Services
+	# ────────────────────────────────────────────────────────────
+
+	# Home Assistant
+	# @homeassistant host homeassistant.svc.{{DOMAIN_NAME}}
+	# handle @homeassistant {
+	# 	reverse_proxy http://homeassistant:8123
+	# }
+
+	# Nextcloud
+	# @nextcloud host nextcloud.svc.{{DOMAIN_NAME}}
+	# handle @nextcloud {
+	# 	reverse_proxy http://nextcloud:80
+	# }
+
+	# Logging
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}
+
+# ============================================================================
+# Configuration Notes
+# ============================================================================
+# 
+# TEMPLATE VARIABLES:
+# - {{DOMAIN_NAME}}: Your service domain (e.g., svc.example.com)
+# - {{WIREGUARD_SERVER_IP}}: Azure WireGuard IP (typically 10.0.0.1)
+#
+# SPLIT DNS CONFIGURATION:
+# Set up your local DNS server (Pi-hole, AdGuard Home, or router) to resolve:
+#   *.svc.example.com → [This server's local IP, e.g., 192.168.1.100]
+#
+# External DNS (deSEC) should resolve:
+#   *.svc.example.com → [Azure VM public IP]
+#
+# BENEFITS:
+# - Local devices connect directly (faster, no bandwidth cost)
+# - External devices route through secure Azure tunnel
+# - Same URLs work seamlessly everywhere
+#
+# SECURITY:
+# - Port 80 only accepts traffic from WireGuard IP ({{WIREGUARD_SERVER_IP}})
+# - Port 443 requires valid certificate
+# - Unknown services return 404
+# - No services exposed to internet without tunnel
+#
+# TROUBLESHOOTING:
+# - Local not working? Check split DNS configuration
+# - External not working? Check WireGuard tunnel status
+# - Check Caddy logs: docker-compose logs -f caddy

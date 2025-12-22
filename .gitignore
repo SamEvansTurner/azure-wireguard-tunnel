@@ -1,0 +1,96 @@
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+*.tfvars
+!terraform.tfvars.example
+
+# Azure Configuration Templates (local only)
+azure-configs/
+!azure-configs.example/
+
+# Home config local files
+Caddyfile
+!Caddyfile.template
+
+# SSH Keys
+*.pem
+*.key
+*_rsa
+*_ed25519
+id_rsa*
+id_ed25519*
+**/*private*key*
+**/*privatekey*
+
+# WireGuard Keys
+**/wireguard/**/privatekey
+**/wireguard/**/private.key
+**/wireguard/**/*.key
+wg*.conf
+!wg0.conf.template
+
+# SSL Certificates
+*.crt
+*.cer
+!*.example.crt
+
+# Environment Files
+.env
+*.env
+!.env.example
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Backup files
+*.backup
+*.bak
+*.old
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Azure
+.azure/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+
+# Node
+node_modules/
+npm-debug.log
+
+# Docker
+.dockerignore
+
+# Secrets and tokens
+*secret*
+*token*
+*password*
+!*example*
+!*template*

@@ -1,0 +1,87 @@
+# Azure WireGuard Secure Tunnel - Home Network Stack
+# Docker Compose configuration for WireGuard client and Caddy reverse proxy
+
+version: '3.8'
+
+services:
+  # WireGuard Client - Connects to Azure
+  wireguard:
+    image: linuxserver/wireguard:latest
+    container_name: wireguard-azure-tunnel
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Australia/Sydney
+    volumes:
+      - ./wireguard:/config
+      - /lib/modules:/lib/modules:ro
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+    networks:
+      - tunnel-network
+
+  # Caddy - Reverse proxy to local services
+  caddy:
+    image: caddy:2-alpine
+    container_name: home-caddy
+    ports:
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/cert.crt:/certs/cert.pem:ro
+      - ./caddy/key.key:/certs/key.pem:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    networks:
+      - tunnel-network
+      - services-network
+    depends_on:
+      - wireguard
+
+  # Certbot with deSEC DNS - Automatic certificate renewal
+  certbot-desec:
+    image: ghcr.io/samevansturner/docker-desec-certbot:latest
+    container_name: certbot-desec
+    environment:
+      - DOMAIN=svc.example.com              # Your service subdomain (e.g., svc.example.com)
+      - DESEC_TOKEN=your_desec_token_here   # deSEC API token from desec.io
+      - EMAIL=your-email@example.com        # Email for Let's Encrypt notifications
+    volumes:
+      - ./caddy:/certs                      # Outputs certificates to Caddy directory
+    restart: unless-stopped
+    # Note: This container runs certbot and renews certificates automatically
+    # Certificates are output as cert.crt and key.key in ./caddy/
+
+  # Certificate sync to Azure VM - Monitors and syncs renewed certificates
+  azure-cert-sync:
+    image: ghcr.io/samevansturner/azure-wireguard-certsync:latest
+    container_name: azure-cert-sync
+    environment:
+      - DOMAIN=*.svc.example.com            # Wildcard domain pattern
+      - AZURE_VM_IP=your.azure.vm.ip        # Azure VM public IP address
+      - SSH_KEY_PATH=/ssh-key/id_ed25519    # Path to SSH key inside container
+    volumes:
+      - ./caddy:/certs:ro                                       # Read-only access to certificates
+      - ~/.ssh/certsync_ed25519:/ssh-key/id_ed25519:ro         # SSH key for certsync user
+    restart: unless-stopped
+    depends_on:
+      - certbot-desec
+    # Note: This container monitors ./caddy/ for certificate changes
+    # When certificates are renewed, they are automatically synced to Azure VM
+
+networks:
+  tunnel-network:
+    driver: bridge
+  services-network:
+    driver: bridge
+    # This network connects to your actual services
+    # Add your service containers to this network
+
+volumes:
+  caddy_data:
+  caddy_config:

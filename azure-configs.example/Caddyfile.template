@@ -1,0 +1,76 @@
+# Azure Caddy Reverse Proxy Configuration Template
+# This file gets injected into cloud-init during deployment
+# Variables in {{BRACKETS}} are replaced by deploy-azure.sh
+
+{
+  admin off
+  auto_https off
+  servers {
+    protocol {
+      strict_sni_host
+    }
+  }
+}
+
+# Wildcard matcher for allowed subdomains
+*.{{DOMAIN_NAME}} {
+  tls /etc/caddy/certs/{{DOMAIN_NAME}}.crt /etc/caddy/certs/{{DOMAIN_NAME}}.key {
+    protocols tls1.2 tls1.3
+  }
+  
+  encode gzip zstd
+  
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    X-XSS-Protection "1; mode=block"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    -Server
+  }
+
+  # Jellyfin - Media Server (whitelisted for external access)
+  @jellyfin host jellyfin.{{DOMAIN_NAME}}
+  handle @jellyfin {
+    reverse_proxy http://{{WIREGUARD_CLIENT_IP}}:80 {
+      header_up Host {host}
+      header_up X-Forwarded-For {remote}
+      header_up X-Real-IP {remote}
+      
+      transport http {
+        dial_timeout 5s
+        response_header_timeout 30s
+      }
+    }
+  }
+  
+  # Add more services here - edit this file and run update-caddy-config.sh
+  # Example: Sonarr
+  # @sonarr host sonarr.{{DOMAIN_NAME}}
+  # handle @sonarr {
+  #   reverse_proxy http://{{WIREGUARD_CLIENT_IP}}:80 {
+  #     transport http {
+  #       dial_timeout 5s
+  #       response_header_timeout 30s
+  #     }
+  #   }
+  # }
+  
+  # Default: Reject undefined services (whitelist approach)
+  handle {
+    respond "Service Not Available" 403
+  }
+  
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
+}
+
+# Explicitly reject base domain
+{{DOMAIN_NAME}} {
+  tls /etc/caddy/certs/{{DOMAIN_NAME}}.crt /etc/caddy/certs/{{DOMAIN_NAME}}.key {
+    protocols tls1.2 tls1.3
+  }
+  respond "Access Denied" 403
+}

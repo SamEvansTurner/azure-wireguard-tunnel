@@ -1,0 +1,35 @@
+# WireGuard Client Configuration Template
+# 
+# INSTRUCTIONS:
+# 1. Copy this file to wg0.conf (in the same directory)
+# 2. Generate your keys: wg genkey | tee privatekey | wg pubkey > publickey
+# 3. Replace <YOUR_PRIVATE_KEY> with content from privatekey file
+# 4. Get Azure public key: ssh to Azure VM and run: sudo cat /etc/wireguard/publickey
+# 5. Replace <AZURE_PUBLIC_KEY> with the Azure public key
+# 6. Replace <AZURE_PUBLIC_IP> with your Azure VM's public IP (from Terraform output)
+# 7. Save the file
+#
+# SECURITY: wg0.conf will be gitignored - it contains your private key!
+
+[Interface]
+# Your home WireGuard private key
+PrivateKey = <YOUR_PRIVATE_KEY>
+
+# IP address for this peer (home side)
+Address = 10.0.0.2/24
+
+# Optional: DNS settings
+# DNS = 1.1.1.1, 1.0.0.1
+
+[Peer]
+# Azure WireGuard server public key
+PublicKey = <AZURE_PUBLIC_KEY>
+
+# Azure VM public IP and WireGuard port
+Endpoint = <AZURE_PUBLIC_IP>:51820
+
+# Only route traffic to Azure VM through tunnel
+AllowedIPs = 10.0.0.1/32
+
+# Keep connection alive through NAT
+PersistentKeepalive = 25
