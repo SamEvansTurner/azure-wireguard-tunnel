@@ -618,7 +618,6 @@ dig @1.1.1.1 jellyfin.svc.example.com
 
 ## 📚 Additional Documentation
 
-- **[Quick Start Guide](QUICKSTART.md)** - Streamlined deployment
 - **[Template System](docs/TEMPLATE-SYSTEM.md)** - Fast config updates
 - **[Certificate Sync Setup](docs/CERTSYNC-DOCKER-SETUP.md)** - Automated cert management
 
