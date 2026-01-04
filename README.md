@@ -361,27 +361,7 @@ The systemd watcher will automatically process uploaded certificates and reload 
 
 #### 3.2 Start Caddy Service
 
-After certificates are synced to Azure, start the Caddy reverse proxy:
-
-```bash
-# SSH into Azure VM
-ssh yourusername@<azure-vm-ip>
-
-# Verify certificates are present
-ls -l /etc/caddy/certs/
-# Should show: {{DOMAIN}}.crt and {{DOMAIN}}.key
-
-# Start Caddy
-sudo systemctl start caddy
-
-# Enable Caddy to start on boot (for future reboots)
-sudo systemctl enable caddy
-
-# Verify Caddy is running
-sudo systemctl status caddy
-```
-
-**Note:** Once certificates are present and Caddy is enabled, it will start automatically on future reboots. You only need to manually start it this first time.
+After certificates are synced to Azure using the certsync process, the caddy service will start automatically.
 
 #### 3.3 Validate Everything Works
 
