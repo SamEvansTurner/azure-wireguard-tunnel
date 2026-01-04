@@ -4,6 +4,7 @@ A solution for securely accessing home services remotely using Azure, WireGuard,
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Terraform](https://img.shields.io/badge/Terraform-%235835CC.svg?logo=terraform&logoColor=white)](https://www.terraform.io/)
+[![Ansible](https://img.shields.io/badge/Ansible-%231A1918.svg?logo=ansible&logoColor=white)](https://www.ansible.com/)
 [![Docker](https://img.shields.io/badge/Docker-%230db7ed.svg?logo=docker&logoColor=white)](https://www.docker.com/)
 
 ## 🎯 What This Solves
@@ -20,10 +21,11 @@ A solution for securely accessing home services remotely using Azure, WireGuard,
 - ✅ **Zero exposed home ports** - Outbound tunnel only, no port forwarding needed
 - ✅ **Your own domain** - Uses your Let's Encrypt wildcard certificate
 - ✅ **No client software** - Access via regular HTTPS in any browser
-- ✅ **Fast configuration updates** - Add services in 5 seconds (no VM recreation)
-- ✅ **Template-based config** - Separate configs from infrastructure
-- ✅ **Infrastructure as Code** - Fully automated with Terraform
+- ✅ **Single configuration file** - All settings in one `config.yml`
+- ✅ **One-command deployment** - `./scripts/deploy.sh` handles everything
+- ✅ **Infrastructure as Code** - Terraform + Ansible automation
 - ✅ **Automatic DNS updates** - VM updates DNS on boot via deSEC API
+- ✅ **Optional bandwidth monitoring** - Auto-throttle based on Azure spending
 - ✅ **No streaming restrictions** - Unlike Cloudflare Tunnel
 
 ## 🏗️ Architecture
@@ -33,12 +35,13 @@ A solution for securely accessing home services remotely using Azure, WireGuard,
     ↓ HTTPS (jellyfin.svc.example.com)
     
 [Azure VM - Your Region]
-├─ Ubuntu Minimal 24.04 (B1ls: 1 vCPU, 512 MB RAM)
+├─ Ubuntu 24.04 (B1ls: 1 vCPU, 512 MB RAM)
 ├─ Caddy: HTTPS termination + reverse proxy
 │   └─ Your wildcard certificate (*.svc.example.com)
 ├─ WireGuard Server: Tunnel endpoint (10.0.0.1)
 ├─ deSEC DNS updater: Auto-updates A records on boot
-└─ Security: NSG, UFW, Fail2Ban, SSH hardening
+├─ Security: NSG, UFW, Fail2Ban, SSH hardening
+└─ [Optional] Bandwidth Monitor: Cost-based throttling
     ↓
     | WireGuard Encrypted Tunnel
     | (Outbound from home - no port forwarding!)
@@ -60,7 +63,6 @@ A solution for securely accessing home services remotely using Azure, WireGuard,
 
 1. **Azure Account**
    - Free tier works initially
-   - Pay-as-you-go for production use
    - Azure CLI installed and authenticated (`az login`)
 
 2. **Your Own Domain & DNS**
@@ -71,7 +73,7 @@ A solution for securely accessing home services remotely using Azure, WireGuard,
 
 3. **Certificate Management**
    - Wildcard certificate for `*.svc.example.com` 
-   - Auto-renewal system required (Certbot, Caddy, TrueNAS, etc.)
+   - Auto-renewal system required (Certbot, Caddy, etc.)
    - Certificates accessible for sync to Azure
    - **Recommended:** Since this project uses deSEC for DNS, you can use [docker-desec-certbot](https://github.com/SamEvansTurner/docker-desec-certbot) - a Docker container that automates wildcard certificate renewal with deSEC + Certbot integration
 
@@ -83,10 +85,11 @@ A solution for securely accessing home services remotely using Azure, WireGuard,
    - Split-DNS setup strongly recommended
 
 5. **Tools**
-   - **Linux/macOS or WSL** - Terraform and deployment scripts require a Linux environment (Windows users: install [WSL 2](https://docs.microsoft.com/en-us/windows/wsl/install))
+   - **Linux/macOS or WSL** - Scripts require Linux environment
    - Terraform (>= 1.0)
+   - Ansible (>= 2.9)
+   - Python 3 (PyEnv and requirements will be created/installed)
    - SSH client
-   - Basic Linux/networking knowledge
 
 ### Domain & Certificate Structure
 
@@ -159,106 +162,72 @@ Additionally, there are example Wireguard Client and Caddy configs in **`home-co
 
 Before Azure deployment, ensure you have:
 - ✅ WireGuard keys generated for your home client
-- ✅ Caddy configured to route your services (Jellyfin, Sonarr, etc.)
-- ✅ Wildcard certificate accessible (for Azure sync)
-- ✅ Services accessible to Caddy (same Docker network or host networking)
+- ✅ Caddy configured to route your services
+- ✅ Wildcard certificate accessible (for use in Azure Caddy)
 
-### Part 2: Deploy Azure Tunnel
+### Part 2: Deploy Azure Infrastructure
 
-#### Prerequisites - Gather Required Information
+#### 2.1 Create Configuration File
 
-Before deploying, collect the following information:
-
-**1. SSH Key for Azure VM Access**
 ```bash
-# Check if SSH key exists
-ls ~/.ssh/id_ed25519.pub
+# Copy the example configuration
+cp config.yml.example config.yml
 
-# If not, generate one
-ssh-keygen -t ed25519 -C "azure-vm-admin"
-# Press Enter for default location
-# Enter passphrase (optional but recommended)
+# Edit with your settings
+nano config.yml
 ```
 
-**2. Your Home IP Address**
-```bash
-# IPv4 address (required)
-curl -4 ifconfig.me
+**Key settings to configure:**
 
-# IPv6 address (if available)
-curl -6 ifconfig.me
+```yaml
+# Azure settings
+azure:
+  subscription_id: ""  # Auto-detected from Azure login
+  location: "australiaeast"
 
-# Save the IPv4 - you'll use it for allowed_ssh_ipv4 in terraform.tfvars
+# SSH access
+ssh:
+  admin_username: "yourusername"
+  public_key_path: "~/.ssh/id_ed25519.pub"
+  allowed_ipv4: "203.0.113.1/32"  # Your home IP
+
+# Domain configuration
+domain:
+  name: "svc.example.com"
+  desec_token: "your-desec-token"
+
+# WireGuard
+wireguard:
+  port: 51820
+  server_ip: "10.0.0.1"
+  client_ip: "10.0.0.2"
+  client_public_key: ""  # Add after home setup
 ```
 
-**3. deSEC API Token**
-- Log in to [deSEC.io](https://desec.io)
-- Navigate to **Token Management**
-- Create a new token with **read/write** permissions
-- Copy and save the token securely
-- You'll use this for `desec_token` in terraform.tfvars
+📚 **Full configuration reference:** See comments in `config.yml.example`
 
-**Why these are needed:**
-- ✅ **SSH key**: Secure access to Azure VM (password auth disabled)
-- ✅ **Home IP**: Restricts SSH access to your network only
-- ✅ **deSEC token**: Enables automatic DNS updates on VM boot
-
-#### 2.1 Configure Azure Templates
+#### 2.2 Deploy Everything
 
 ```bash
-# Copy example templates to working directory
-cp -r azure-configs.example/ azure-configs/
+# Full deployment (Terraform + Ansible)
+./scripts/deploy.sh
 
-# Edit WireGuard server template with your HOME public key
-nano azure-configs/wg0-server.conf.template
-# Replace PLACEHOLDER_HOME_PUBLIC_KEY with your home's WireGuard public key
-
-# Customize Caddyfile for your services
-nano azure-configs/Caddyfile.template
-# Add service blocks matching your home Caddyfile, or at least for the services you wish to access remotely
-```
-
-**📚 Reference:** See `azure-configs.example/README.md` for template details
-
-#### 2.2 Configure Terraform Variables
-
-```bash
-cd terraform
-
-# Copy example configuration
-cp terraform.tfvars.example terraform.tfvars
-
-# Edit with your details
-nano terraform.tfvars
-```
-
-**📚 Complete Variable Reference:** See [terraform/README.md](terraform/README.md) for detailed descriptions of all configuration options.
-
-#### 2.3 Deploy Infrastructure
-
-```bash
-# From project root
-./scripts/deploy-azure.sh
-
-# This script will:
-# 1. Validate all prerequisites
-# 2. Process configuration templates
-# 3. Deploy Azure infrastructure (5-10 minutes)
-# 4. Output connection details and Azure WireGuard public key
+# This will:
+# 1. Validate your configuration
+# 2. Create Azure infrastructure (Terraform)
+# 3. Configure the VM (Ansible)
+# 4. Output connection details
 ```
 
 **Save the output!** You'll need:
 - Azure VM public IP
 - Azure WireGuard public key
 
-#### 2.4 Connect Home to Azure
+#### 2.3 Connect Home to Azure
 
-Update your home WireGuard configuration:
+Update your home WireGuard configuration with Azure details:
 
-```bash
-# Edit home WireGuard config on home server
-
-# Update with Azure details from deployment output:
+```ini
 [Peer]
 PublicKey = <Azure WireGuard public key from deployment>
 Endpoint = <Azure VM IP>:51820
@@ -266,15 +235,13 @@ AllowedIPs = 10.0.0.1/32
 PersistentKeepalive = 25
 ```
 
-Restart the wireguard client and test connectivity
-
+Restart WireGuard and verify:
 ```bash
-# Verify tunnel is connected
 wg show
 # Should show handshake and data transfer
 ```
 
-#### 2.5 Post-Deployment Status
+#### 2.4 Post-Deployment Status
 
 After deployment completes, the Azure VM has the following status:
 
@@ -311,10 +278,10 @@ The cert-sync container is pre-built and available at `ghcr.io/samevansturner/az
 **Generate and install SSH key for cert-sync:**
 
 ```bash
-# Generate SSH key (no passphrase for automation)
+# Generate SSH key for cert-sync
 ssh-keygen -t ed25519 -f ~/.ssh/certsync_ed25519 -C "cert-sync" -N ""
 
-# Upload and install the key automatically
+# Install key on Azure VM
 cat ~/.ssh/certsync_ed25519.pub | ssh yourusername@<azure-vm-ip> \
   "sudo mkdir -p /home/certsync/.ssh && \
    sudo tee /home/certsync/.ssh/authorized_keys > /dev/null && \
@@ -339,8 +306,7 @@ docker run -d \
   --name azure-cert-sync \
   --restart unless-stopped \
   -e DOMAIN="*.svc.example.com" \
-  -e SSH_KEY_PATH="/ssh-key/id_ed25519" \
-  -v /path/to/your/certificates:/certs:ro \
+  -v /path/to/certs:/certs:ro \
   -v ~/.ssh/certsync_ed25519:/ssh-key/id_ed25519:ro \
   ghcr.io/samevansturner/azure-wireguard-certsync:latest
 ```
@@ -423,7 +389,7 @@ sudo systemctl status caddy
 # Run full validation
 ./scripts/validate.sh
 
-# Test accessing your service from an external IP
+# Test from an external network
 curl -I https://jellyfin.svc.example.com
 # Should return: HTTP/2 200
 
@@ -431,228 +397,185 @@ curl -I https://jellyfin.svc.example.com
 # Visit: https://jellyfin.svc.example.com
 ```
 
-**Total setup time: 30-60 minutes** (depending on familiarity)
+**Total setup time: 30-60 minutes**
 
-## ⚡ Fast Configuration Updates
+## ⚙️ Unified Configuration
 
-One of the key features of this project is the ability to update service configurations in seconds without recreating the Azure VM.
+All settings are managed through a single file: `config.yml`
 
-### Template System
+### How It Works
 
-Configuration is separated from infrastructure:
-- **Templates:** `azure-configs/` (your working configs, gitignored)
-- **Infrastructure:** `terraform/` (deployment code)
-- **Home:** `home-configs/` (Docker Compose stack)
-
-### Adding a New Service to the Tunnel Forward (5 seconds!)
-
-```bash
-# 1. Edit template
-nano azure-configs/Caddyfile.template
-
-# Add service block:
-@radarr host radarr.{{DOMAIN_NAME}}
-handle @radarr {
-  reverse_proxy http://{{WIREGUARD_CLIENT_IP}}:80 {
-    header_up Host {host}
-  }
-}
-
-# 2. Push update to Azure
-./scripts/update-caddy-config.sh
-
-# Done! Service is live in ~5 seconds
+```
+config.yml (Single Source of Truth)
+       │
+       └─── ./scripts/deploy.sh
+                   │
+                   ├─── Generates terraform.tfvars
+                   ├─── Runs Terraform (Azure infrastructure)
+                   ├─── Generates Ansible inventory
+                   └─── Runs Ansible (VM configuration)
 ```
 
-**No VM recreation needed!** The update script:
-- ✅ Processes templates
-- ✅ Validates configuration
-- ✅ SCPs to Azure
-- ✅ Reloads Caddy (zero downtime)
-- ✅ Automatically rolls back on failure
+### Configuration Sections
 
-### Update Scripts
+| Section | Description |
+|---------|-------------|
+| `azure` | Subscription, location, VM size |
+| `ssh` | Admin username, SSH key paths, allowed IPs |
+| `domain` | Domain name, deSEC token |
+| `wireguard` | Tunnel port and IPs |
+| `network` | VNet and subnet settings |
+| `bandwidth_monitor` | Optional cost-based throttling |
+| `jellyfin` | Jellyfin API settings (if bandwidth monitor enabled) |
+| `tags` | Azure resource tags |
 
-- `./scripts/update-caddy-config.sh` - Update reverse proxy (5 sec)
-- `./scripts/update-wireguard-peer.sh` - Update WireGuard config (5 sec)
-- `./scripts/deploy-azure.sh` - Full redeployment (10 min, for infrastructure changes)
+### Deployment Options
 
-**📚 Full Documentation:** See [docs/TEMPLATE-SYSTEM.md](docs/TEMPLATE-SYSTEM.md)
+```bash
+# Full deployment
+./scripts/deploy.sh
+
+# Plan only (preview changes)
+./scripts/deploy.sh --plan
+
+# Ansible only (skip Terraform)
+./scripts/deploy.sh --ansible
+
+# Destroy infrastructure
+./scripts/deploy.sh --destroy
+```
+
+## 📊 Bandwidth Monitoring (Optional)
+
+Automatically throttle Jellyfin streaming based on Azure spending to stay within budget.
+
+### Prerequisites
+
+1. **Create an Azure Budget:**
+   ```bash
+   az consumption budget create \
+     --budget-name "Monthly-Bandwidth-Limit" \
+     --amount 150 \
+     --time-grain Monthly \
+     --start-date "2026-01-01" \
+     --end-date "2027-12-31"
+   ```
+
+2. **Enable in config.yml:**
+   ```yaml
+   bandwidth_monitor:
+     enabled: true
+     azure_budget_name: "Monthly-Bandwidth-Limit"
+     fallback_budget: 150.00
+
+   jellyfin:
+    subdomain: "jellyfin"
+    api_key: "your-api-key"
+   ```
+
+3. **Re-deploy:**
+   ```bash
+   ./scripts/deploy.sh --ansible
+   ```
+
+### How It Works
+
+| Budget Used | Quality | Bitrate |
+|-------------|---------|---------|
+| < 50% | Full (1080p-4K) | 20 Mbps |
+| 50-75% | Medium (720p) | 3 Mbps |
+| 75-90% | Low (480p) | 1 Mbps |
+| > 90% | Disabled | 0 |
+
+📚 **Full details:** See [ansible/BANDWIDTH_MONITOR_SPEC.md](ansible/BANDWIDTH_MONITOR_SPEC.md)
 
 ## 🔐 Security Model
 
 ### 8 Layers of Defense
 
-1. **Azure NSG (Network Security Group)**
-   - Firewall at cloud network edge
-   - Only allows: HTTPS (443), SSH from your IP, WireGuard (51820)
-   - Blocks all other inbound traffic
-
-2. **UFW (Uncomplicated Firewall)**
-   - Host-level firewall on Azure VM
-   - Defense in depth (redundant with NSG)
-   - Identical rules to NSG
-
-3. **Fail2Ban**
-   - Automatically bans IPs after failed SSH attempts
-   - 3 failures = 1 hour ban
-   - Protects against brute force
-
-4. **SSH Hardening**
-   - Public key authentication ONLY
-   - Password authentication disabled
-   - Root login disabled
-   - No common usernames allowed
-
-5. **WireGuard Encryption**
-   - ChaCha20-Poly1305 encryption
-   - Perfect forward secrecy
-   - Minimal attack surface
-
-6. **Caddy Security Headers**
-   - HSTS (HTTP Strict Transport Security)
-   - X-Content-Type-Options
-   - X-Frame-Options
-   - Referrer-Policy
-
-7. **Home IP Whitelist (Optional)**
-   - Caddy only accepts traffic from Azure
-   - Additional layer if desired
-
-8. **OS Hardening**
-   - Kernel parameter tuning
-   - Minimal installed packages
-   - Automatic security updates
-   - Log monitoring
+1. **Azure NSG** - Cloud network firewall
+2. **UFW** - Host-level firewall
+3. **Fail2Ban** - Brute-force protection
+4. **SSH Hardening** - Key-only auth, no root
+5. **WireGuard** - ChaCha20-Poly1305 encryption
+6. **Caddy Headers** - HSTS, CSP, X-Frame-Options
+7. **Home IP Whitelist** - Optional Caddy restriction
+8. **OS Hardening** - Kernel tuning, auto-updates
 
 ### No Exposed Home Ports
 
-The tunnel is **outbound only** from your home network:
 - ✅ No port forwarding required
 - ✅ No firewall changes needed
 - ✅ Home network remains fully protected
-- ✅ Even if Azure is compromised, home network is safe
-
-### Certificate Security
-
-- Certificates synced via SSH (encrypted in transit)
-- Stored with restricted permissions on Azure
-- Dedicated user (`certsync`) with no sudo access
-- Systemd handles secure installation
-
-## 📂 Project Structure
-
-```
-azure-wireguard-tunnel/
-│
-├── azure-configs.example/       # Example Azure config templates
-│
-├── home-configs/                # Home Docker stack examples
-│   ├── docker-compose.yml       # Docker container setup examples
-│   ├── caddy/                   # Caddy config examples
-│   └── wireguard/               # Wireguard config examples
-│
-├── terraform/                   # Infrastructure as Code
-│
-├── cloud-init/                  # VM bootstrap
-│   └── bootstrap.yml            # Automated VM setup - loaded from azure-configs + scripts/azure-vm
-│
-├── docker/                      # Cert-sync container
-│
-├── scripts/                     # Automation scripts
-│   └── azure-vm/                # Azure VM scripts
-│
-├── docs/                        # Documentation
-│   ├── TEMPLATE-SYSTEM.md       # Template system guide
-│   └── CERTSYNC-DOCKER-SETUP.md # Cert sync setup
-│
-└── .github/workflows/           # CI/CD
-```
 
 ## 🔧 Management & Maintenance
 
-### Common Operations
+### Update Configuration
 
-**Manual certificate sync:**
 ```bash
-# If automated sync isn't set up yet - this is useful when first deploying the azure VM
-./scripts/sync-certs.sh
+# Edit config.yml, then:
+./scripts/deploy.sh --ansible
+```
+
+### Check Status
+
+```bash
+# SSH to VM
+ssh yourusername@<azure-vm-ip>
+
+# Check services
+sudo systemctl status caddy wireguard-wg0
+sudo wg show
+
+# Check bandwidth monitor (if enabled)
+sudo /opt/bandwidth-monitor/monitor-costs.py status
 ```
 
 ### Troubleshooting
 
 **Tunnel won't connect:**
 ```bash
-# Check WireGuard on both ends
-wg show  # Home - inside docker container
-ssh yourusername@<azure-ip> 'sudo wg show'  # Azure
-
-# Verify IPs and keys match configuration
-# Check firewall allows UDP 51820
+wg show  # Check both ends
+# Verify IPs, keys, and UDP 51820 is open
 ```
 
 **Can't access services:**
 ```bash
-# Test from Azure VM
 ssh yourusername@<azure-ip>
 curl http://10.0.0.2:80 -H "Host: jellyfin.svc.example.com"
-
-# Check Caddy is running
-docker-compose ps  # Home
-ssh yourusername@<azure-ip> 'systemctl status caddy'  # Azure
+sudo systemctl status caddy
 ```
 
 **DNS not updating:**
 ```bash
-# Check DNS update service
 ssh yourusername@<azure-ip> 'sudo journalctl -u dns-update -n 50'
-
-# Manually trigger update
-ssh yourusername@<azure-ip> 'sudo systemctl restart dns-update'
-
-# Verify DNS
-dig @1.1.1.1 jellyfin.svc.example.com
 ```
 
-**📚 More troubleshooting:** See service logs and validate.sh output
+## 📚 Documentation
 
 ## 📚 Additional Documentation
 
-- **[Template System](docs/TEMPLATE-SYSTEM.md)** - Fast config updates
 - **[Certificate Sync Setup](docs/CERTSYNC-DOCKER-SETUP.md)** - Automated cert management
 
 ## 💡 Comparison with Alternatives
 
-| Feature | This Project | Cloudflare Tunnel | Tailscale | Traditional VPN |
-|---------|--------------|-------------------|-----------|-----------------|
-| Media streaming | ✅ Unrestricted | ❌ Against TOS | ✅ Yes | ✅ Yes |
-| No client software | ✅ Browser only | ✅ Browser only | ❌ Needs client | ❌ Needs client |
-| Your own domain | ✅ Yes | ⚠️ Shared | ❌ No | ⚠️ Complex |
-| Port forwarding | ✅ Not needed | ✅ Not needed | ✅ Not needed | ❌ Required |
-| Cost | ~$10/month | Free | Free-$5/mo | $5-15/mo |
-| Privacy | ✅ Full control | ⚠️ Cloudflare sees traffic | ⚠️ Tailscale relay | ✅ Full control |
-| Setup complexity | Medium | Easy | Easy | Complex |
-
-**When to use alternatives:**
-- Simple file access → Tailscale
-- No media streaming → Cloudflare Tunnel
-- Just need VPN → Traditional VPN service
+| Feature | This Project | Cloudflare Tunnel | Tailscale |
+|---------|--------------|-------------------|-----------|
+| Media streaming | ✅ Unrestricted | ❌ Against TOS | ✅ Yes |
+| No client software | ✅ Browser only | ✅ Browser only | ❌ Needs client |
+| Your own domain | ✅ Yes | ⚠️ Shared | ❌ No |
+| Port forwarding | ✅ Not needed | ✅ Not needed | ✅ Not needed |
+| Cost | ~$10/month | Free | Free-$5/mo |
+| Privacy | ✅ Full control | ⚠️ Cloudflare sees traffic | ⚠️ Relay |
 
 ## 🤝 Contributing
 
-Contributions are welcome! This project is designed to be:
-- **Educational** - Learn cloud infrastructure, IaC, networking
-- **Customizable** - Fork and adapt for your needs
-
-**Ways to contribute:**
+Contributions welcome! Areas of interest:
 - Report issues or bugs
-- Improve documentation
-- Add support for other cloud providers (AWS, GCP)
+- Additional bandwidth control targets (beyond Jellyfin)
 - Enhance security features
 - Optimize costs further
 
 ## 📝 License
 
-MIT License - See [LICENSE](LICENSE) file for details.
-
-Feel free to use this project for personal or commercial purposes. Attribution appreciated but not required.
+MIT License - See [LICENSE](LICENSE) file.

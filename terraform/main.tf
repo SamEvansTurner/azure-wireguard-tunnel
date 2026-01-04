@@ -1,16 +1,14 @@
 # Azure WireGuard Secure Tunnel - Main Configuration
-# Provider and backend configuration
+#
+# This creates the Azure infrastructure.
+# Application configuration (WireGuard, Caddy, etc.) is handled by Ansible.
 
 terraform {
   required_version = ">= 1.0"
-  
+
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 3.0"
-    }
-    random = {
-      source  = "hashicorp/random"
       version = "~> 3.0"
     }
   }
@@ -28,6 +26,9 @@ provider "azurerm" {
     }
   }
 }
+
+# Get current subscription for role assignments
+data "azurerm_subscription" "current" {}
 
 # Resource Group
 resource "azurerm_resource_group" "main" {
@@ -130,7 +131,7 @@ resource "azurerm_public_ip" "main" {
   name                = "pip-${var.resource_group_name}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
-  allocation_method   = "Static"  # Required for Internet routing
+  allocation_method   = "Static" # Required for Internet routing
   sku                 = "Standard"
   sku_tier            = "Regional"
   ip_version          = "IPv4"
@@ -147,7 +148,7 @@ resource "azurerm_public_ip" "main" {
   tags = merge(
     var.tags,
     {
-      RoutingType = "Internet"
+      RoutingType   = "Internet"
       CostOptimized = "true"
     }
   )
@@ -173,43 +174,6 @@ resource "azurerm_network_interface" "main" {
 resource "azurerm_network_interface_security_group_association" "main" {
   network_interface_id      = azurerm_network_interface.main.id
   network_security_group_id = azurerm_network_security_group.main.id
-}
-
-# Generate WireGuard private key
-resource "random_password" "wireguard_private_key" {
-  length  = 32
-  special = false
-}
-
-# Load process-certs script (kept private, injected into cloud-init)
-data "template_file" "process_certs_script" {
-  template = file("${path.module}/../scripts/azure-vm/process-certs.sh")
-
-  vars = {
-    domain_name = var.domain_name
-  }
-}
-
-# Cloud-init configuration
-data "template_file" "cloud_init" {
-  template = file("${path.module}/../cloud-init/bootstrap.yml")
-
-  vars = {
-    admin_username          = var.admin_username
-    wireguard_port          = var.wireguard_port
-    wireguard_server_ip     = var.wireguard_server_ip
-    wireguard_client_ip     = var.wireguard_client_ip
-    wireguard_subnet        = var.wireguard_subnet
-    domain_name             = var.domain_name
-    subdomain               = var.subdomain
-    desec_token             = var.desec_token
-    home_caddy_port         = var.home_caddy_port
-    allowed_ssh_ipv4        = var.allowed_ssh_ipv4
-    allowed_ssh_ipv6        = var.allowed_ssh_ipv6
-    process_certs_script    = indent(6, data.template_file.process_certs_script.rendered)
-    azure_caddyfile_content = indent(6, var.azure_caddyfile_content)
-    azure_wireguard_config  = indent(6, var.azure_wireguard_config)
-  }
 }
 
 # Linux Virtual Machine
@@ -246,8 +210,14 @@ resource "azurerm_linux_virtual_machine" "main" {
     version   = "latest"
   }
 
-  # Bootstrap with cloud-init
-  custom_data = base64encode(data.template_file.cloud_init.rendered)
+  # Minimal cloud-init - just installs python3 for Ansible
+  custom_data = filebase64("${path.module}/../cloud-init/bootstrap.yml")
+
+  # Enable System-Assigned Managed Identity for Azure API access
+  # Used by bandwidth monitor to query Cost Management API
+  identity {
+    type = "SystemAssigned"
+  }
 
   # Boot diagnostics
   boot_diagnostics {
@@ -261,4 +231,12 @@ resource "azurerm_linux_virtual_machine" "main" {
       OS   = "Ubuntu Minimal 24.04 LTS"
     }
   )
+}
+
+# Grant VM managed identity access to Cost Management API
+# Required for bandwidth monitor to query Azure spending
+resource "azurerm_role_assignment" "vm_cost_reader" {
+  scope                = data.azurerm_subscription.current.id
+  role_definition_name = "Cost Management Reader"
+  principal_id         = azurerm_linux_virtual_machine.main.identity[0].principal_id
 }

@@ -1,0 +1,26 @@
+---
+# SSH Hardening Role - Secure SSH Configuration
+
+- name: Deploy SSH hardening configuration
+  template:
+    src: ssh-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-hardening.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: '/usr/sbin/sshd -t -f %s'
+  notify: restart sshd
+
+- name: Ensure SSH service is enabled
+  systemd:
+    name: sshd
+    enabled: yes
+    state: started
+
+- name: Display SSH hardening status
+  debug:
+    msg:
+      - "SSH hardening applied"
+      - "Password authentication: disabled"
+      - "Root login: disabled"
+      - "Only public key authentication allowed"

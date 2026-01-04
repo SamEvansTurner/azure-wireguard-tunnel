@@ -1,0 +1,8 @@
+# Certificate sync user - SFTP only (no shell access)
+# Managed by Ansible
+
+Match User {{ certsync_user }}
+    ForceCommand internal-sftp
+    PermitTTY no
+    X11Forwarding no
+    AllowTcpForwarding no

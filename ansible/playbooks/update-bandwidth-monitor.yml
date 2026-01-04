@@ -1,0 +1,61 @@
+---
+# Azure WireGuard Tunnel - Update Bandwidth Monitor Only
+# Quick playbook to update just the bandwidth monitoring component
+#
+# Usage:
+#   cd ansible
+#   ansible-playbook -i inventory/azure.yml playbooks/update-bandwidth-monitor.yml -e @../config.yml
+
+- name: Update Bandwidth Monitor
+  hosts: azure_vm
+  become: yes
+  gather_facts: yes
+
+  pre_tasks:
+    - name: Check if bandwidth monitor is enabled
+      fail:
+        msg: "Bandwidth monitoring is not enabled in config.yml. Set bandwidth_monitor.enabled: true"
+      when: not (bandwidth_monitor_enabled | default(false) | bool)
+
+    - name: Display update info
+      debug:
+        msg:
+          - "Updating bandwidth monitor on: {{ ansible_host }}"
+          - "Azure budget name: {{ azure_budget_name }}"
+          - "Fallback budget: ${{ fallback_budget }}"
+
+  roles:
+    - role: bandwidth-monitor
+      tags: ['bandwidth', 'monitoring']
+
+  post_tasks:
+    - name: Restart bandwidth monitor timer
+      systemd:
+        name: bandwidth-monitor.timer
+        state: restarted
+        enabled: yes
+
+    - name: Trigger immediate monitoring run
+      command: "{{ bandwidth_monitor_dir }}/monitor-costs.py"
+      register: monitor_output
+      changed_when: false
+      failed_when: false
+
+    - name: Display monitor status
+      debug:
+        msg:
+          - "=========================================="
+          - "Bandwidth monitor updated successfully!"
+          - "=========================================="
+          - ""
+          - "Check status:"
+          - "  sudo systemctl status bandwidth-monitor.timer"
+          - "  sudo {{ bandwidth_monitor_dir }}/monitor-costs.py status"
+          - ""
+          - "View logs:"
+          - "  sudo tail -f {{ bandwidth_monitor_log }}"
+          - "  sudo journalctl -u bandwidth-monitor.timer -f"
+          - ""
+          - "Manual trigger:"
+          - "  sudo {{ bandwidth_monitor_dir }}/monitor-costs.py"
+          - "=========================================="

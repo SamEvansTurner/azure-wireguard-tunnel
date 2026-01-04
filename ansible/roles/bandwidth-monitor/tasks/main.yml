@@ -1,0 +1,134 @@
+---
+# Bandwidth Monitor Role - Tasks
+# Implements Azure cost monitoring with automatic Jellyfin throttling
+
+- name: Add Jellyfin hostname to /etc/hosts for local HTTPS routing
+  lineinfile:
+    path: /etc/hosts
+    line: "127.0.0.1 {{ jellyfin.subdomain }}.{{ domain.name }}"
+    regexp: "^127\\.0\\.0\\.1.*{{ jellyfin.subdomain | regex_escape }}\\.{{ domain.name | regex_escape }}$"
+    state: present
+  when: jellyfin.api_key is defined and jellyfin.api_key | length > 0
+
+- name: Create bandwidth monitor directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "{{ bandwidth_monitor_dir }}"
+    - "{{ bandwidth_monitor_state | dirname }}"
+
+- name: Install Python dependencies
+  apt:
+    name:
+      - python3
+      - python3-pip
+      - python3-venv
+    state: present
+
+- name: Create Python virtual environment
+  pip:
+    name:
+      - pip
+      - setuptools
+      - wheel
+    virtualenv: "{{ bandwidth_monitor_dir }}/venv"
+    virtualenv_command: python3 -m venv
+
+- name: Copy requirements.txt
+  copy:
+    src: requirements.txt
+    dest: "{{ bandwidth_monitor_dir }}/requirements.txt"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install Python packages in virtual environment
+  pip:
+    requirements: "{{ bandwidth_monitor_dir }}/requirements.txt"
+    virtualenv: "{{ bandwidth_monitor_dir }}/venv"
+    virtualenv_command: python3 -m venv
+
+- name: Deploy bandwidth monitoring script
+  template:
+    src: monitor-costs.py.j2
+    dest: "{{ bandwidth_monitor_dir }}/monitor-costs.py"
+    owner: root
+    group: root
+    mode: '0755'
+  notify: restart bandwidth-monitor timer
+
+- name: Create bandwidth monitor systemd service
+  template:
+    src: bandwidth-monitor.service.j2
+    dest: /etc/systemd/system/bandwidth-monitor.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload systemd
+
+- name: Create bandwidth monitor systemd timer
+  template:
+    src: bandwidth-monitor.timer.j2
+    dest: /etc/systemd/system/bandwidth-monitor.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload systemd
+
+- name: Create bandwidth monitor log file
+  file:
+    path: "{{ bandwidth_monitor_log }}"
+    state: touch
+    owner: root
+    group: root
+    mode: '0644'
+    modification_time: preserve
+    access_time: preserve
+
+- name: Initialize state file if not exists
+  copy:
+    content: |
+      {
+        "last_check": null,
+        "last_cost": 0.0,
+        "last_percentage": 0.0,
+        "last_limit": "unlimited",
+        "last_budget": 0.0,
+        "budget_source": "not_detected"
+      }
+    dest: "{{ bandwidth_monitor_state }}"
+    owner: root
+    group: root
+    mode: '0644'
+    force: no
+
+- name: Enable and start bandwidth monitor timer
+  systemd:
+    name: bandwidth-monitor.timer
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Display bandwidth monitor info
+  debug:
+    msg:
+      - "Bandwidth monitor installed successfully"
+      - "Configuration:"
+      - "  - Azure budget name: {{ bandwidth_monitor.azure_budget_name }}"
+      - "  - Fallback budget: ${{ bandwidth_monitor.fallback_budget }}"
+      - "  - Monitor directory: {{ bandwidth_monitor_dir }}"
+      - "  - Check interval: {{ bandwidth_monitor_interval }}"
+      - ""
+      - "Jellyfin integration:"
+      - "  - URL: https://{{ jellyfin.subdomain }}.{{ domain.name }} (via localhost)"
+      - "  - API: /System/Configuration (RemoteClientBitrateLimit)"
+      - "  - API key configured: {{ 'yes' if jellyfin.api_key else 'no' }}"
+      - ""
+      - "Usage:"
+      - "  - Check status: sudo {{ bandwidth_monitor_dir }}/monitor-costs.py status"
+      - "  - Manual run: sudo {{ bandwidth_monitor_dir }}/monitor-costs.py"
+      - "  - View logs: sudo tail -f {{ bandwidth_monitor_log }}"

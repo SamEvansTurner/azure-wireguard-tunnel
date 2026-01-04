@@ -1,0 +1,1 @@
+Inventory is automatically generated from terraform variables in deploy.sh

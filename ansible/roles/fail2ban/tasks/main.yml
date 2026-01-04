@@ -1,0 +1,31 @@
+---
+# Fail2ban Role - Intrusion Prevention
+
+- name: Ensure Fail2ban is installed
+  apt:
+    name: fail2ban
+    state: present
+
+- name: Deploy Fail2ban jail.local configuration
+  template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart fail2ban
+
+- name: Ensure Fail2ban is enabled and started
+  systemd:
+    name: fail2ban
+    enabled: yes
+    state: started
+
+- name: Display Fail2ban status
+  debug:
+    msg:
+      - "Fail2ban configured and running"
+      - "Ban time: {{ fail2ban_bantime }} seconds"
+      - "Max retries: {{ fail2ban_maxretry }}"
+      - "Check status: sudo fail2ban-client status"
+      - "Check SSH jail: sudo fail2ban-client status sshd"

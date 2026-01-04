@@ -1,4 +1,6 @@
-# Azure WireGuard Secure Tunnel - Outputs
+# Azure WireGuard Secure Tunnel - Terraform Outputs
+#
+# Infrastructure facts only - next steps shown by Ansible after full deployment.
 
 output "resource_group_name" {
   description = "Name of the resource group"
@@ -39,66 +41,21 @@ output "estimated_monthly_cost" {
   )
 }
 
-output "wireguard_config_template" {
-  description = "Template for home WireGuard configuration"
-  value = <<-EOT
-    # Save this to home-configs/wireguard/wg0.conf
-    # Then generate keys with: wg genkey | tee privatekey | wg pubkey > publickey
-    
-    [Interface]
-    PrivateKey = <YOUR_HOME_PRIVATE_KEY>
-    Address = ${var.wireguard_client_ip}/24
-    
-    [Peer]
-    PublicKey = <AZURE_PUBLIC_KEY_FROM_VM>
-    Endpoint = ${azurerm_public_ip.main.ip_address}:${var.wireguard_port}
-    AllowedIPs = ${var.wireguard_server_ip}/32
-    PersistentKeepalive = 25
-  EOT
-}
-
-output "next_steps" {
-  description = "Next steps after Terraform deployment"
-  value = <<-EOT
-    ✅ Azure infrastructure deployed successfully!
-    
-    Next steps:
-    
-    1. Wait ~5 minutes for cloud-init to complete
-    
-    2. SSH into the VM to get WireGuard public key:
-       ${var.admin_username}@${azurerm_public_ip.main.ip_address}
-       sudo cat /etc/wireguard/publickey
-    
-    3. Configure home WireGuard with the Azure public key
-       (See wireguard_config_template output above)
-    
-    4. Start home Docker stack:
-       cd home-configs && docker-compose up -d
-    
-    5. Sync your SSL certificates:
-       ./scripts/sync-certs.sh
-    
-    6. Update DNS to point to Azure IP:
-       ${var.domain_name} A ${azurerm_public_ip.main.ip_address}
-       (or wait for auto-update on next VM boot)
-    
-    7. Test your setup:
-       curl -I https://${var.domain_name}
-    
-    Estimated cost: ${var.vm_size == "Standard_B1ls" ? "$8.10/month" : "$14.30/month"}
-  EOT
-}
-
 output "security_summary" {
   description = "Security configuration summary"
   value = {
-    ssh_allowed_ipv4  = var.allowed_ssh_ipv4
-    ssh_allowed_ipv6  = var.allowed_ssh_ipv6 != "" ? var.allowed_ssh_ipv6 : "Not configured"
-    https_port        = 443
-    wireguard_port    = var.wireguard_port
-    password_auth     = "DISABLED"
-    root_login        = "DISABLED"
-    authentication    = "SSH Key Only"
+    ssh_allowed_ipv4 = var.allowed_ssh_ipv4
+    ssh_allowed_ipv6 = var.allowed_ssh_ipv6 != "" ? var.allowed_ssh_ipv6 : "Not configured"
+    https_port       = 443
+    wireguard_port   = var.wireguard_port
+    password_auth    = "DISABLED"
+    root_login       = "DISABLED"
+    authentication   = "SSH Key Only"
   }
+}
+
+# Azure subscription ID - auto-detected, passed to Ansible for bandwidth monitor
+output "subscription_id" {
+  description = "Azure subscription ID (auto-detected)"
+  value       = data.azurerm_subscription.current.subscription_id
 }

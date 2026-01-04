@@ -1,0 +1,71 @@
+---
+# Firewall Role - UFW Configuration
+# 
+# Normal runs are idempotent - rules are only added if missing.
+# To force a clean reset: ansible-playbook ... --tags firewall,reset-firewall
+
+- name: Ensure UFW is installed
+  apt:
+    name: ufw
+    state: present
+
+- name: Reset UFW to default state (only when explicitly requested)
+  ufw:
+    state: reset
+  tags: ['never', 'reset-firewall']
+
+- name: Set UFW default policies
+  ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: 'incoming', policy: '{{ ufw_default_incoming }}' }
+    - { direction: 'outgoing', policy: '{{ ufw_default_outgoing }}' }
+
+- name: Allow SSH from home IPv4
+  ufw:
+    rule: allow
+    port: '22'
+    proto: tcp
+    from_ip: "{{ ssh.allowed_ipv4 | regex_replace('/32$', '') }}"
+    comment: 'SSH from home IPv4'
+  when: ssh.allowed_ipv4 | default('') | length > 0
+
+- name: Allow SSH from home IPv6
+  ufw:
+    rule: allow
+    port: '22'
+    proto: tcp
+    from_ip: "{{ ssh.allowed_ipv6 | regex_replace('/128$', '') }}"
+    comment: 'SSH from home IPv6'
+  when: ssh.allowed_ipv6 | default('') | length > 0
+
+- name: Allow HTTPS
+  ufw:
+    rule: allow
+    port: '443'
+    proto: tcp
+    comment: 'HTTPS'
+
+- name: Allow WireGuard
+  ufw:
+    rule: allow
+    port: "{{ wireguard.port }}"
+    proto: udp
+    comment: 'WireGuard'
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+
+- name: Display firewall status
+  debug:
+    msg:
+      - "UFW firewall configured and enabled"
+      - "SSH allowed from: {{ ssh.allowed_ipv4 if ssh.allowed_ipv4 else 'not configured' }}"
+      - "HTTPS: port 443/tcp"
+      - "WireGuard: port {{ wireguard.port }}/udp"
+      - "Check status: sudo ufw status verbose"
+      - ""
+      - "To reset firewall rules, run:"
+      - "  ansible-playbook ... --tags firewall,reset-firewall"

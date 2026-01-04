@@ -1,0 +1,32 @@
+[Interface]
+# Azure WireGuard Server Configuration
+# Managed by Ansible
+
+# Server private key (auto-generated)
+PrivateKey = {{ wg_private_key_content.content | b64decode | trim }}
+
+# Server IP address on the tunnel network
+Address = {{ wireguard.server_ip }}/24
+
+# UDP port for WireGuard
+ListenPort = {{ wireguard.port }}
+
+# iptables rules to enable forwarding and NAT
+PostUp = iptables -A FORWARD -i {{ wireguard_interface }} -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PostDown = iptables -D FORWARD -i {{ wireguard_interface }} -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+
+[Peer]
+# Home network peer configuration
+{% if wireguard.client_public_key %}
+PublicKey = {{ wireguard.client_public_key }}
+{% else %}
+# IMPORTANT: Set wireguard_client_public_key in your inventory or group_vars
+# Get it from your home server: docker-compose exec wireguard cat /config/publickey
+PublicKey = REPLACE_WITH_YOUR_HOME_WIREGUARD_PUBLIC_KEY
+{% endif %}
+
+# IP address of home client on tunnel network
+AllowedIPs = {{ wireguard.client_ip }}/32
+
+# Keep connection alive through NAT
+PersistentKeepalive = 25

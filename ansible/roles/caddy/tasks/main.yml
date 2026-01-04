@@ -1,0 +1,142 @@
+---
+# Caddy Role - Reverse Proxy Configuration
+#
+# Caddyfile validation requires certificates to exist.
+# On first run (before cert-sync), config is deployed without validation.
+# Caddy service only starts if certificates exist.
+
+- name: Create caddy user
+  user:
+    name: "{{ caddy_user }}"
+    system: yes
+    shell: /bin/false
+    home: /var/lib/caddy
+    create_home: yes
+    state: present
+
+- name: Add Caddy GPG key
+  apt_key:
+    url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+    keyring: /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    state: present
+
+- name: Add Caddy repository
+  apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+    filename: caddy-stable
+    state: present
+
+- name: Install Caddy
+  apt:
+    name: caddy
+    state: present
+    update_cache: yes
+
+- name: Ensure Caddy directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ caddy_user }}"
+    group: "{{ caddy_group }}"
+    mode: '0755'
+    recurse: no
+  loop:
+    - "{{ caddy_config_dir }}"
+    - "{{ caddy_certs_dir }}"
+    - /var/lib/caddy/.local/share/caddy
+    - /var/lib/caddy/.config/caddy
+
+- name: Ensure Caddy log directory exists with correct ownership
+  file:
+    path: "{{ caddy_log_dir }}"
+    state: directory
+    owner: "{{ caddy_user }}"
+    group: "{{ caddy_group }}"
+    mode: '0755'
+    recurse: yes
+
+- name: Check if TLS certificates exist
+  stat:
+    path: "{{ caddy_certs_dir }}/{{ domain.name }}.crt"
+  register: caddy_cert_file
+
+- name: Set cert existence fact for handlers
+  set_fact:
+    caddy_certs_present: "{{ caddy_cert_file.stat.exists }}"
+
+- name: Deploy Caddyfile configuration (with validation - certs exist)
+  template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config_dir }}/Caddyfile"
+    owner: "{{ caddy_user }}"
+    group: "{{ caddy_group }}"
+    mode: '0644'
+    validate: '/usr/bin/caddy validate --adapter caddyfile --config %s'
+  notify: reload caddy
+  when: caddy_cert_file.stat.exists
+
+- name: Deploy Caddyfile configuration (without validation - first run)
+  template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config_dir }}/Caddyfile"
+    owner: "{{ caddy_user }}"
+    group: "{{ caddy_group }}"
+    mode: '0644'
+  when: not caddy_cert_file.stat.exists
+
+- name: Deploy Caddy systemd service
+  template:
+    src: caddy.service.j2
+    dest: /etc/systemd/system/caddy.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: caddy_service_changed
+
+- name: Enable Caddy service
+  systemd:
+    name: caddy
+    enabled: yes
+    daemon_reload: yes
+
+- name: Restart Caddy service (service file changed, certs exist)
+  systemd:
+    name: caddy
+    state: restarted
+  when: caddy_service_changed.changed and caddy_cert_file.stat.exists
+
+- name: Start Caddy service (only if certificates exist)
+  systemd:
+    name: caddy
+    state: started
+  when: caddy_cert_file.stat.exists
+
+- name: Display Caddy info (certificates exist)
+  debug:
+    msg:
+      - "Caddy reverse proxy configured and running"
+      - "Domain: *.{{ domain.name }}"
+      - "Proxying to: {{ wireguard.client_ip }}"
+      - "Config: {{ caddy_config_dir }}/Caddyfile"
+      - "Certs: {{ caddy_certs_dir }}"
+      - "Logs: {{ caddy_log_dir }}/access.log"
+      - ""
+      - "Check status: sudo systemctl status caddy"
+      - "Validate config: sudo caddy validate --adapter caddyfile --config {{ caddy_config_dir }}/Caddyfile"
+      - "Reload config: sudo systemctl reload caddy"
+  when: caddy_cert_file.stat.exists
+
+- name: Display Caddy info (waiting for certificates)
+  debug:
+    msg:
+      - "Caddy reverse proxy configured but NOT running"
+      - "Reason: TLS certificates not found"
+      - ""
+      - "Expected certificate: {{ caddy_certs_dir }}/{{ domain.name }}.crt"
+      - ""
+      - "To complete setup:"
+      - "  1. Sync certificates from home server via SFTP"
+      - "  2. Run: sudo systemctl start caddy"
+      - ""
+      - "Or run the cert-sync process from your home server"
+  when: not caddy_cert_file.stat.exists

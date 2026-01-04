@@ -1,0 +1,19 @@
+---
+# Caddy Role - Handlers
+#
+# Handlers are conditional based on caddy_certs_present fact set by tasks.
+# This prevents restart/reload failures when certificates don't exist yet.
+
+- name: restart caddy
+  systemd:
+    name: caddy
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+  when: caddy_certs_present | default(false)
+
+- name: reload caddy
+  systemd:
+    name: caddy
+    state: reloaded
+  when: caddy_certs_present | default(false)

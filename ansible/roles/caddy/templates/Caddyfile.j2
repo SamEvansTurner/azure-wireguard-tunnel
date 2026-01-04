@@ -1,0 +1,79 @@
+# Azure Caddy Reverse Proxy Configuration
+# Managed by Ansible
+
+{
+  admin off
+  auto_https off
+  servers {
+    strict_sni_host
+  }
+}
+
+# Wildcard matcher for allowed subdomains
+*.{{ domain.name }} {
+  tls {{ caddy_certs_dir }}/{{ domain.name }}.crt {{ caddy_certs_dir }}/{{ domain.name }}.key {
+    protocols tls1.2 tls1.3
+  }
+  
+  encode gzip zstd
+  
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    X-XSS-Protection "1; mode=block"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    -Server
+  }
+
+  # Jellyfin - Media Server (whitelisted for external access)
+  @jellyfin host jellyfin.{{ domain.name }}
+  handle @jellyfin {
+    reverse_proxy http://{{ wireguard.client_ip }}:{{ network.home_caddy_port }} {
+      transport http {
+        dial_timeout 5s
+        response_header_timeout 30s
+      }
+    }
+  }
+  
+  @seerr host seerr.{{ domain.name }}
+  handle @seerr {
+    reverse_proxy http://{{ wireguard.client_ip }}:{{ network.home_caddy_port }} {
+      transport http {
+        dial_timeout 5s
+        response_header_timeout 30s
+      }
+    }
+  }
+  
+  # Add more services here as needed
+  # Example: Sonarr
+  # @sonarr host sonarr.{{ domain.name }}
+  # handle @sonarr {
+  #   reverse_proxy http://{{ wireguard.client_ip }}:{{ network.home_caddy_port }} {
+  #     transport http {
+  #       dial_timeout 5s
+  #       response_header_timeout 30s
+  #     }
+  #   }
+  # }
+  
+  # Default: Reject undefined services (whitelist approach)
+  handle {
+    respond "Service Not Available" 403
+  }
+  
+  log {
+    output file {{ caddy_log_dir }}/access.log
+    format json
+  }
+}
+
+# Explicitly reject base domain
+{{ domain.name }} {
+  tls {{ caddy_certs_dir }}/{{ domain.name }}.crt {{ caddy_certs_dir }}/{{ domain.name }}.key {
+    protocols tls1.2 tls1.3
+  }
+  respond "Access Denied" 403
+}

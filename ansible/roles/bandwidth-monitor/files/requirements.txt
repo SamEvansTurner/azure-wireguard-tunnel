@@ -1,0 +1,14 @@
+# Azure Bandwidth Monitor - Python Requirements
+
+# Azure SDK for Python
+azure-identity>=1.15.0
+azure-mgmt-costmanagement>=4.0.0
+azure-mgmt-consumption>=10.0.0
+azure-mgmt-billing>=6.0.0
+
+# HTTP client for Jellyfin API
+requests>=2.31.0
+
+# JSON handling (built-in, but listed for clarity)
+# json - built-in
+# datetime - built-in

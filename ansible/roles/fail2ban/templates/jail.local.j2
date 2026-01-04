@@ -1,0 +1,23 @@
+[DEFAULT]
+# Fail2ban configuration
+# Managed by Ansible
+
+# Ban duration in seconds
+bantime = {{ fail2ban_bantime }}
+
+# Time window for counting retries
+findtime = {{ fail2ban_findtime }}
+
+# Max failed attempts before ban
+maxretry = {{ fail2ban_maxretry }}
+
+# Destination email for notifications (optional)
+#destemail = root@localhost
+
+[sshd]
+enabled = true
+port = 22
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = {{ fail2ban_maxretry }}
+bantime = {{ fail2ban_bantime }}

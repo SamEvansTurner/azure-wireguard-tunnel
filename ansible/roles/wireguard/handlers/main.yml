@@ -1,0 +1,13 @@
+---
+# WireGuard Role - Handlers
+
+- name: restart wireguard
+  systemd:
+    name: "wg-quick@{{ wireguard_interface }}"
+    state: restarted
+    enabled: yes
+
+- name: reload wireguard
+  command: "wg syncconf {{ wireguard_interface }} <(wg-quick strip {{ wireguard_interface }})"
+  args:
+    executable: /bin/bash

@@ -1,0 +1,23 @@
+# SSH Hardening Configuration
+# Managed by Ansible
+
+# Password authentication disabled
+PasswordAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+
+# Public key authentication only
+PubkeyAuthentication yes
+
+# No root login
+PermitRootLogin no
+
+# Session settings
+MaxAuthTries 3
+MaxSessions 2
+ClientAliveInterval 300
+ClientAliveCountMax 2
+
+# Disable X11 and TCP forwarding
+X11Forwarding no
+AllowTcpForwarding no

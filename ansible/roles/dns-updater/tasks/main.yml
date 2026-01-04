@@ -1,0 +1,41 @@
+---
+# DNS Updater Role - deSEC Dynamic DNS
+
+- name: Deploy DNS update script
+  template:
+    src: update-dns.sh.j2
+    dest: /usr/local/bin/update-dns.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Deploy DNS update systemd service
+  template:
+    src: dns-update.service.j2
+    dest: /etc/systemd/system/dns-update.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload systemd
+
+- name: Enable DNS update service
+  systemd:
+    name: dns-update.service
+    enabled: yes
+    daemon_reload: yes
+
+- name: Run DNS update immediately
+  systemd:
+    name: dns-update.service
+    state: started
+
+- name: Display DNS updater info
+  debug:
+    msg:
+      - "DNS updater configured"
+      - "Domain: {{ domain.subdomain }}.{{ domain.name }}"
+      - "Provider: deSEC.io"
+      - "Runs on boot and updates IP automatically"
+      - ""
+      - "Manual update: sudo /usr/local/bin/update-dns.sh"
+      - "Check status: sudo systemctl status dns-update.service"

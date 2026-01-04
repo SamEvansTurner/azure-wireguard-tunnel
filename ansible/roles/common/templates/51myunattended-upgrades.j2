@@ -1,0 +1,23 @@
+// Unattended upgrades configuration
+// Managed by Ansible
+
+// Automatically reboot when required
+Unattended-Upgrade::Automatic-Reboot "{{ 'true' if unattended_upgrades_auto_reboot else 'false' }}";
+
+// If automatic reboot is enabled, reboot at this time
+Unattended-Upgrade::Automatic-Reboot-Time "02:00";
+
+// Send email notifications (requires mail setup)
+//Unattended-Upgrade::Mail "root";
+
+// Only upgrade packages from security updates
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Ubuntu,archive=${distro_codename}-security";
+    "o=Ubuntu,a=${distro_codename}-updates";
+};
+
+// Remove unused dependencies after upgrade
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+// Automatically remove unused kernel packages
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";

@@ -1,0 +1,364 @@
+#!{{ bandwidth_monitor_dir }}/venv/bin/python3
+"""
+Azure Bandwidth Monitor - Cost Management & Jellyfin Throttling
+Monitors Azure spending and automatically adjusts Jellyfin streaming quality
+"""
+
+import json
+import sys
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+
+try:
+    import requests
+    from azure.identity import DefaultAzureCredential
+    from azure.mgmt.costmanagement import CostManagementClient
+    from azure.mgmt.consumption import ConsumptionManagementClient
+except ImportError as e:
+    print(f"ERROR: Missing required Python package: {e}", file=sys.stderr)
+    print("Run: pip install -r requirements.txt", file=sys.stderr)
+    sys.exit(1)
+
+# Configuration from Ansible
+CONFIG = {
+    'subscription_id': '{{ azure.subscription_id }}',
+    'azure_budget_name': '{{ bandwidth_monitor.azure_budget_name }}',
+    'fallback_budget': {{ bandwidth_monitor.fallback_budget }},
+    'jellyfin_host': '{{ wireguard.client_ip }}',
+    'jellyfin_port': {{ network.home_caddy_port }},
+    'jellyfin_hostname': '{{ jellyfin.subdomain }}.{{ domain.name }}',
+    'jellyfin_api_key': '{{ jellyfin.api_key }}',
+    'bandwidth_thresholds': {{ bandwidth_monitor.thresholds | to_json }},
+    'bandwidth_limits': {{ bandwidth_monitor.limits | to_json }},
+    'state_file': '{{ bandwidth_monitor_state }}',
+    'log_file': '{{ bandwidth_monitor_log }}'
+}
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(CONFIG['log_file']),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+
+class AzureCostMonitor:
+    """Monitors Azure costs and manages bandwidth throttling"""
+
+    def __init__(self):
+        self.credential = None
+        self.cost_client = None
+        self.consumption_client = None
+        self.state = self._load_state()
+
+    def _load_state(self) -> Dict:
+        """Load state from file"""
+        state_file = Path(CONFIG['state_file'])
+        if state_file.exists():
+            try:
+                with open(state_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load state file: {e}")
+        
+        return {
+            'last_check': None,
+            'last_cost': 0.0,
+            'last_percentage': 0.0,
+            'last_limit': 'unlimited',
+            'last_budget': 0.0,
+            'budget_source': 'not_detected'
+        }
+
+    def _save_state(self):
+        """Save state to file"""
+        try:
+            state_file = Path(CONFIG['state_file'])
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(state_file, 'w') as f:
+                json.dump(self.state, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save state: {e}")
+
+    def _init_azure_clients(self):
+        """Initialize Azure clients with managed identity"""
+        try:
+            if not self.credential:
+                self.credential = DefaultAzureCredential()
+                logger.info("Azure credential initialized")
+            
+            if not self.cost_client:
+                self.cost_client = CostManagementClient(
+                    credential=self.credential,
+                    subscription_id=CONFIG['subscription_id']
+                )
+                logger.info("Cost Management client initialized")
+            
+            if not self.consumption_client:
+                self.consumption_client = ConsumptionManagementClient(
+                    credential=self.credential,
+                    subscription_id=CONFIG['subscription_id']
+                )
+                logger.info("Consumption client initialized")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize Azure clients: {e}")
+            return False
+
+    def get_monthly_budget(self) -> Tuple[float, str]:
+        """
+        Get monthly budget from Azure Budget API or fallback.
+        
+        Prerequisites:
+        - Create an Azure Budget in Azure Portal or via CLI
+        - Ensure VM managed identity has 'Cost Management Reader' role
+        
+        Returns: (budget_amount, source)
+        """
+        # Try to initialize Azure clients
+        if not self._init_azure_clients():
+            logger.warning("Azure clients not available, using fallback budget")
+            return CONFIG['fallback_budget'], "fallback_config"
+
+        # Query Azure Budget API
+        try:
+            scope = f"/subscriptions/{CONFIG['subscription_id']}"
+            budgets = list(self.consumption_client.budgets.list(scope=scope))
+            
+            # Look for budget by name if configured
+            target_name = CONFIG['azure_budget_name']
+            for budget in budgets:
+                if budget.name == target_name:
+                    budget_amount = float(budget.amount)
+                    logger.info(f"Found budget '{target_name}': ${budget_amount:.2f}")
+                    return budget_amount, "azure_budget_api"
+            
+            # If named budget not found, use first budget
+            if budgets:
+                budget = budgets[0]
+                budget_amount = float(budget.amount)
+                logger.info(f"Using first available budget '{budget.name}': ${budget_amount:.2f}")
+                return budget_amount, "azure_budget_api"
+            else:
+                logger.warning("No Azure Budgets found, using fallback")
+                
+        except Exception as e:
+            logger.warning(f"Failed to query Azure Budget API: {e}")
+
+        # Fall back to configured value
+        logger.info(f"Using fallback budget: ${CONFIG['fallback_budget']:.2f}")
+        return CONFIG['fallback_budget'], "fallback_config"
+
+    def get_current_spending(self) -> float:
+        """Get current month's spending from Azure Cost Management API"""
+        if not self._init_azure_clients():
+            logger.error("Cannot get spending - Azure clients not initialized")
+            return 0.0
+
+        try:
+            # Get current month date range
+            now = datetime.now(timezone.utc)
+            start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            # Query cost management API
+            scope = f"/subscriptions/{CONFIG['subscription_id']}"
+            
+            # Build query
+            from azure.mgmt.costmanagement.models import QueryDefinition, QueryTimePeriod, TimeframeType
+            
+            time_period = QueryTimePeriod(
+                from_property=start_of_month,
+                to=now
+            )
+            
+            query = QueryDefinition(
+                type="ActualCost",
+                timeframe=TimeframeType.CUSTOM,
+                time_period=time_period,
+                dataset={
+                    "granularity": "None",
+                    "aggregation": {
+                        "totalCost": {
+                            "name": "PreTaxCost",
+                            "function": "Sum"
+                        }
+                    }
+                }
+            )
+            
+            result = self.cost_client.query.usage(scope=scope, parameters=query)
+            
+            # Extract cost from result
+            if result.rows and len(result.rows) > 0:
+                cost = float(result.rows[0][0])
+                logger.info(f"Current month spending: ${cost:.2f}")
+                return cost
+            else:
+                logger.warning("No cost data returned from API")
+                return 0.0
+                
+        except Exception as e:
+            logger.error(f"Failed to query current spending: {e}")
+            return 0.0
+
+    def calculate_bandwidth_limit(self, cost: float, budget: float) -> Tuple[str, int]:
+        """
+        Calculate appropriate bandwidth limit based on spending percentage
+        
+        3-tier system (from config):
+        - Below 'high' threshold: high quality (4 Mbps)
+        - Between 'high' and 'disabled': medium quality (2 Mbps)
+        - Above 'disabled': service disabled (0)
+        
+        Returns: (limit_name, bitrate)
+        """
+        if budget <= 0:
+            logger.warning("Budget is 0, disabling service")
+            return 'disabled', 0
+
+        percentage = (cost / budget) * 100
+        thresholds = CONFIG['bandwidth_thresholds']
+        limits = CONFIG['bandwidth_limits']
+
+        # Convert threshold values to integers for comparison
+        t_high = int(thresholds.get('high', 50))
+        t_medium = int(thresholds.get('medium', 75))
+        t_disabled = int(thresholds.get('disabled', 90))
+
+        if percentage >= t_disabled:
+            return 'disabled', int(limits.get('disabled', 0))
+        elif percentage >= t_high:
+            return 'medium', int(limits.get('medium', 2000000))
+        else:
+            return 'high', int(limits.get('high', 4000000))
+
+    def update_jellyfin_bitrate(self, bitrate: int) -> bool:
+        """Update Jellyfin RemoteClientBitrateLimit via API
+        
+        Uses HTTPS through local Caddy (hostname resolves to 127.0.0.1 via /etc/hosts)
+        This avoids egress traffic while using proper TLS with hostname-based routing.
+        """
+        if not CONFIG['jellyfin_api_key']:
+            logger.error("Jellyfin API key not configured")
+            return False
+
+        try:
+            # Use HTTPS with the hostname (resolves to localhost via /etc/hosts)
+            # This goes: script -> local Caddy (HTTPS) -> WireGuard -> home Caddy -> Jellyfin
+            url = f"https://{CONFIG['jellyfin_hostname']}/System/Configuration"
+            headers = {
+                'X-Emby-Token': CONFIG['jellyfin_api_key'],
+                'Content-Type': 'application/json'
+            }
+
+            # First, get current configuration
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            config = response.json()
+
+            # Update RemoteClientBitrateLimit (streaming bitrate limit for remote clients)
+            config['RemoteClientBitrateLimit'] = bitrate
+
+            # Send updated configuration
+            response = requests.post(url, headers=headers, json=config, timeout=30)
+            response.raise_for_status()
+
+            logger.info(f"Updated Jellyfin RemoteClientBitrateLimit to {bitrate} bps ({bitrate / 1000000:.1f} Mbps)")
+            return True
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to update Jellyfin: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error updating Jellyfin: {e}")
+            return False
+
+    def run_check(self):
+        """Main monitoring logic"""
+        logger.info("=" * 60)
+        logger.info("Starting bandwidth monitor check")
+
+        # Get budget
+        budget, budget_source = self.get_monthly_budget()
+        logger.info(f"Monthly budget: ${budget:.2f} (source: {budget_source})")
+
+        # Get current spending
+        current_cost = self.get_current_spending()
+        
+        # Calculate bandwidth limit
+        limit_name, bitrate = self.calculate_bandwidth_limit(current_cost, budget)
+        percentage = (current_cost / budget * 100) if budget > 0 else 0
+
+        logger.info(f"Current cost: ${current_cost:.2f} ({percentage:.1f}% of budget)")
+        logger.info(f"Bandwidth limit: {limit_name} ({bitrate / 1000000:.1f} Mbps)")
+
+        # Update Jellyfin if limit changed
+        if limit_name != self.state.get('last_limit') or bitrate != CONFIG['bandwidth_limits'].get(self.state.get('last_limit', ''), 0):
+            logger.info(f"Limit changed from {self.state.get('last_limit')} to {limit_name}, updating Jellyfin")
+            success = self.update_jellyfin_bitrate(bitrate)
+            if not success:
+                logger.warning("Failed to update Jellyfin, will retry next check")
+        else:
+            logger.info("No change in bandwidth limit, skipping Jellyfin update")
+
+        # Update state
+        self.state.update({
+            'last_check': datetime.now(timezone.utc).isoformat(),
+            'last_cost': current_cost,
+            'last_percentage': percentage,
+            'last_limit': limit_name,
+            'last_budget': budget,
+            'budget_source': budget_source
+        })
+        self._save_state()
+
+        logger.info("Bandwidth monitor check complete")
+        logger.info("=" * 60)
+
+    def print_status(self):
+        """Print current status"""
+        last_limit = self.state.get('last_limit', 'unlimited')
+        bitrate = int(CONFIG['bandwidth_limits'].get(last_limit, 20000000))
+        
+        status = {
+            "azure_budget_name": CONFIG['azure_budget_name'],
+            "fallback_budget": f"${CONFIG['fallback_budget']:.2f}",
+            "current_cost": f"${self.state.get('last_cost', 0):.2f}",
+            "budget_limit": f"${self.state.get('last_budget', 0):.2f}",
+            "percentage": f"{self.state.get('last_percentage', 0):.1f}%",
+            "bandwidth_limit": last_limit,
+            "bitrate": f"{bitrate / 1000000:.1f} Mbps",
+            "last_updated": self.state.get('last_check', 'never'),
+            "budget_source": self.state.get('budget_source', 'not_detected'),
+            "jellyfin_host": CONFIG['jellyfin_host'],
+            "jellyfin_port": CONFIG['jellyfin_port']
+        }
+        
+        print(json.dumps(status, indent=2))
+
+
+def main():
+    """Main entry point"""
+    monitor = AzureCostMonitor()
+
+    if len(sys.argv) > 1 and sys.argv[1] == 'status':
+        # Print status and exit
+        monitor.print_status()
+    else:
+        # Run monitoring check
+        try:
+            monitor.run_check()
+        except Exception as e:
+            logger.error(f"Monitoring check failed: {e}", exc_info=True)
+            sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

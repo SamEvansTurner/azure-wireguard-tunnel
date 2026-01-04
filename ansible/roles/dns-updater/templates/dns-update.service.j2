@@ -1,0 +1,13 @@
+[Unit]
+Description=Update DNS on boot
+Documentation=https://github.com/SamEvansTurner/azure-wireguard-tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/update-dns.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

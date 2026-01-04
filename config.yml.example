@@ -1,0 +1,210 @@
+# =============================================================================
+# Azure WireGuard Tunnel - Configuration
+# =============================================================================
+# 
+# INSTRUCTIONS:
+# 1. Copy this file to config.yml
+# 2. Replace all CHANGEME values with your actual configuration
+# 3. DO NOT commit config.yml to git (it's in .gitignore)
+# 4. Run: ./scripts/deploy.sh
+#
+# ENVIRONMENT VARIABLES:
+# Some sensitive values can be set via environment variables:
+#   - DESEC_TOKEN: Your deSEC API token
+#   - JELLYFIN_API_KEY: Jellyfin API key (if bandwidth monitoring enabled)
+#
+# =============================================================================
+
+# =============================================================================
+# AZURE CONFIGURATION
+# =============================================================================
+azure:
+  # Azure subscription ID (optional - auto-detected from Terraform)
+  # Only needed if you want to override the auto-detected value
+  # Find via: az account show --query id -o tsv
+  subscription_id: ""
+  
+  # Azure region for resources
+  location: "australiaeast"
+  
+  # Resource group name
+  resource_group: "rg-secure-tunnel"
+  
+  # VM size (Standard_B1ls = $3.80/mo, Standard_B1s = $10/mo)
+  vm_size: "Standard_B1ls"
+  
+  # Use static IP address (costs $0.85/month more than dynamic)
+  use_static_ip: false
+  
+  # Availability zones for Public IP (zone-redundant by default)
+  # ["1", "2", "3"]: Zone-redundant (recommended)
+  # ["1"]: Single zone
+  # []: No zones (only for non-zonal regions)
+  availability_zones:
+    - "1"
+    - "2"
+    - "3"
+
+# =============================================================================
+# SSH & ACCESS CONFIGURATION
+# =============================================================================
+ssh:
+  # Admin username for the VM (NOT 'admin', 'root', or 'azureuser')
+  admin_username: "CHANGEME"
+  
+  # Path to your SSH public key
+  # Generate with: ssh-keygen -t ed25519 -C "your@email.com"
+  public_key_path: "~/.ssh/id_ed25519.pub"
+  
+  # Path to your SSH private key (for Ansible)
+  private_key_path: "~/.ssh/id_ed25519"
+  
+  # Your home public IPv4 address with /32
+  # Find via: curl -4 ifconfig.me
+  allowed_ipv4: "CHANGEME/32"
+  
+  # Your home public IPv6 address with /128 (optional)
+  # Find via: curl -6 ifconfig.me
+  # Leave empty if you don't have or don't want IPv6 SSH access
+  allowed_ipv6: ""
+
+# =============================================================================
+# DOMAIN & DNS CONFIGURATION
+# =============================================================================
+domain:
+  # Your full domain name (e.g., svc.example.com)
+  name: "CHANGEME"
+  
+  # Subdomain part ("*" for wildcard, or specific like "services")
+  subdomain: "*"
+  
+  # deSEC API token (get from: https://desec.io/)
+  # Can also be set via DESEC_TOKEN environment variable
+  desec_token: "CHANGEME"
+
+# =============================================================================
+# WIREGUARD TUNNEL CONFIGURATION
+# =============================================================================
+wireguard:
+  # UDP port for WireGuard (must be 1024-65535)
+  port: 51820
+  
+  # Subnet for WireGuard tunnel network
+  subnet: "10.0.0.0/24"
+  
+  # IP address for WireGuard server (Azure side)
+  server_ip: "10.0.0.1"
+  
+  # IP address for WireGuard client (home side)
+  client_ip: "10.0.0.2"
+  
+  # Home WireGuard public key (set after generating keys on home network)
+  # Generate on home: wg genkey | tee privatekey | wg pubkey > publickey
+  client_public_key: ""
+
+# =============================================================================
+# NETWORK CONFIGURATION
+# =============================================================================
+network:
+  # Virtual network address space
+  vnet_address_space: "10.1.0.0/16"
+  
+  # Subnet address prefix
+  subnet_address: "10.1.1.0/24"
+  
+  # Port where home Caddy listens for proxied requests
+  home_caddy_port: 8080
+
+# =============================================================================
+# BANDWIDTH MONITORING (Optional Feature)
+# =============================================================================
+# 
+# This feature monitors Azure spending and automatically throttles Jellyfin
+# streaming quality to stay within budget. Requires:
+#   1. An Azure Budget configured (see Prerequisites below)
+#   2. Jellyfin API access through the WireGuard tunnel
+#   3. VM managed identity with "Cost Management Reader" role
+#
+# PREREQUISITES:
+# Create an Azure Budget via Azure Portal or CLI:
+#   az consumption budget create \
+#     --budget-name "Monthly-Bandwidth-Limit" \
+#     --amount 150 \
+#     --time-grain Monthly \
+#     --start-date "2026-01-01" \
+#     --end-date "2027-12-31" \
+#     --subscription <your-subscription-id>
+#
+# =============================================================================
+bandwidth_monitor:
+  # Enable bandwidth monitoring and Jellyfin throttling
+  # Set to true to enable this feature
+  enabled: false
+  
+  # Name of the Azure Budget to query
+  # Must match the budget name created in Azure
+  azure_budget_name: "Monthly-Bandwidth-Limit"
+  
+  # Fallback budget amount if Azure Budget API is unavailable (USD)
+  fallback_budget: 150.00
+  
+  # Throttling thresholds (percentage of budget used)
+  # When budget usage exceeds a threshold, bitrate is reduced to next tier
+  thresholds:
+    high: 50         # 0-50%: High quality (4 Mbps)
+    disabled: 90     # 50-90%: Medium quality (2 Mbps), Above 90%: Disabled
+  
+  # Bitrate limits in bits per second
+  limits:
+    high: 4000000         # 4 Mbps (720p-1080p)
+    medium: 2000000       # 2 Mbps (480p-720p)
+    disabled: 0           # Service off
+
+# =============================================================================
+# JELLYFIN CONFIGURATION (Required if bandwidth_monitor.enabled = true)
+# =============================================================================
+jellyfin:
+  # Jellyfin subdomain (prepended to domain.name)
+  # e.g., "jellyfin" with domain "svc.example.com" → jellyfin.svc.example.com
+  # The bandwidth monitor will access Jellyfin via:
+  #   http://<wireguard.client_ip>:<network.home_caddy_port>/
+  #   with Host header: <subdomain>.<domain.name>
+  subdomain: "jellyfin"
+  
+  # Jellyfin API key for bandwidth control
+  # Get from: Jellyfin Dashboard > API Keys > Add
+  # Can also be set via JELLYFIN_API_KEY environment variable
+  api_key: ""
+
+# =============================================================================
+# RESOURCE TAGS
+# =============================================================================
+tags:
+  Environment: "Production"
+  ManagedBy: "Terraform"
+  Project: "SecureTunnel"
+  CostCenter: "Personal"
+
+# =============================================================================
+# COST ESTIMATE
+# =============================================================================
+# 
+# With B1ls + Dynamic IP (recommended):
+# - VM: $3.80/month
+# - Disk: $1.50/month
+# - Public IP: $2.80/month
+# - Total: ~$8.10/month ($97.20/year)
+#
+# With B1s + Static IP:
+# - VM: $10/month
+# - Disk: $1.50/month  
+# - Public IP: $3.65/month
+# - Total: ~$15.15/month ($181.80/year)
+#
+# Bandwidth costs (egress):
+# - First 100 GB/month: Free
+# - 100 GB - 10 TB: $0.087/GB
+# - Unlimited streaming at 20 Mbps ≈ 6.5 TB/month ≈ $560/month
+# - This is why bandwidth monitoring is important!
+#
+# =============================================================================

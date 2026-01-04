@@ -1,0 +1,5 @@
+# Python dependencies for deploy.sh script
+# Auto-installed when running ./scripts/deploy.sh
+
+PyYAML>=6.0
+ansible>=2.15

@@ -1,6 +1,12 @@
-# Azure WireGuard Secure Tunnel - Variables
+# Azure WireGuard Secure Tunnel - Terraform Variables
+#
+# These variables define the Azure infrastructure.
+# Application configuration (WireGuard, Caddy, etc.) is handled by Ansible.
 
+# =============================================================================
 # Azure Configuration
+# =============================================================================
+
 variable "location" {
   description = "Azure region for resources"
   type        = string
@@ -13,7 +19,10 @@ variable "resource_group_name" {
   default     = "rg-secure-tunnel"
 }
 
+# =============================================================================
 # VM Configuration
+# =============================================================================
+
 variable "vm_size" {
   description = "Size of the VM (Standard_B1ls = $3.80/mo, Standard_B1s = $10/mo)"
   type        = string
@@ -41,7 +50,10 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/id_ed25519.pub"
 }
 
+# =============================================================================
 # Network Configuration
+# =============================================================================
+
 variable "vnet_address_space" {
   description = "Address space for the virtual network"
   type        = string
@@ -92,9 +104,12 @@ variable "use_static_ip" {
   default     = false
 }
 
-# WireGuard Configuration
+# =============================================================================
+# WireGuard Port (for NSG rule only - full config handled by Ansible)
+# =============================================================================
+
 variable "wireguard_port" {
-  description = "UDP port for WireGuard"
+  description = "UDP port for WireGuard (used for Azure NSG rule)"
   type        = number
   default     = 51820
 
@@ -104,60 +119,10 @@ variable "wireguard_port" {
   }
 }
 
-variable "wireguard_subnet" {
-  description = "Subnet for WireGuard tunnel network"
-  type        = string
-  default     = "10.0.0.0/24"
-}
-
-variable "wireguard_server_ip" {
-  description = "IP address for WireGuard server (Azure side)"
-  type        = string
-  default     = "10.0.0.1"
-}
-
-variable "wireguard_client_ip" {
-  description = "IP address for WireGuard client (home side)"
-  type        = string
-  default     = "10.0.0.2"
-}
-
-# Domain and DNS Configuration
-variable "domain_name" {
-  description = "Your full domain name (e.g., services.yourdomain.com or svc.example.com)"
-  type        = string
-
-  validation {
-    condition     = can(regex("^([a-z0-9][a-z0-9-]{0,61}[a-z0-9]\\.)+[a-z]{2,}$", var.domain_name))
-    error_message = "Please provide a valid domain name (e.g., svc.example.au or services.example.com)."
-  }
-}
-
-variable "subdomain" {
-  description = "Subdomain part only (e.g., 'services' for services.yourdomain.com)"
-  type        = string
-  default     = "services"
-}
-
-variable "desec_token" {
-  description = "deSEC API token for DNS updates"
-  type        = string
-  sensitive   = true
-
-  validation {
-    condition     = length(var.desec_token) > 10
-    error_message = "deSEC token appears to be invalid or not set."
-  }
-}
-
-# Application Configuration
-variable "home_caddy_port" {
-  description = "Port where home Caddy listens for proxied requests"
-  type        = number
-  default     = 8080
-}
-
+# =============================================================================
 # Tags
+# =============================================================================
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)
@@ -167,17 +132,4 @@ variable "tags" {
     Project     = "SecureTunnel"
     CostCenter  = "Personal"
   }
-}
-
-# Template Content (injected by deploy-azure.sh)
-variable "azure_caddyfile_content" {
-  description = "Processed Caddyfile template content (injected at deploy time)"
-  type        = string
-  default     = ""
-}
-
-variable "azure_wireguard_config" {
-  description = "Processed WireGuard config template content (injected at deploy time)"
-  type        = string
-  default     = ""
 }

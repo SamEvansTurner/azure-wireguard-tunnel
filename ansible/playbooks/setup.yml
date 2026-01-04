@@ -1,0 +1,138 @@
+---
+# Azure WireGuard Tunnel - Main Setup Playbook
+# This playbook orchestrates the complete deployment
+#
+# Variables come directly from config.yml passed via -e @config.yml
+# Roles access nested config values directly (e.g., domain.name, wireguard.port)
+
+- name: Setup Azure WireGuard Tunnel with Bandwidth Monitoring
+  hosts: azure_vm
+  become: yes
+  gather_facts: yes
+
+  pre_tasks:
+    - name: Display deployment info
+      debug:
+        msg:
+          - "Deploying to: {{ ansible_host }}"
+          - "Domain: {{ domain.name }}"
+          - "Bandwidth monitoring: {{ 'enabled' if bandwidth_monitor.enabled | default(false) | bool else 'disabled' }}"
+      tags: always
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: always
+
+  roles:
+    # Phase 1: Base system setup
+    - role: common
+      tags: ['common', 'base']
+
+    # Phase 2: Security hardening
+    - role: ssh-hardening
+      tags: ['ssh', 'security']
+
+    - role: firewall
+      tags: ['firewall', 'security']
+
+    - role: fail2ban
+      tags: ['fail2ban', 'security']
+
+    # Phase 3: Core services
+    - role: wireguard
+      tags: ['wireguard', 'tunnel']
+
+    - role: caddy
+      tags: ['caddy', 'proxy']
+
+    # Phase 4: Auxiliary services
+    - role: dns-updater
+      tags: ['dns', 'dns-updater']
+
+    - role: cert-sync
+      tags: ['certs', 'cert-sync']
+
+    # Phase 5: Bandwidth monitoring (optional feature)
+    - role: bandwidth-monitor
+      when: bandwidth_monitor.enabled | default(false) | bool
+      tags: ['bandwidth', 'bandwidth-monitor', 'monitoring']
+
+  post_tasks:
+    # Get the Azure WireGuard public key for display
+    - name: Get WireGuard public key
+      slurp:
+        src: /etc/wireguard/publickey
+      register: wg_public_key_file
+      ignore_errors: yes
+
+    - name: Set WireGuard public key fact
+      set_fact:
+        azure_wg_public_key: "{{ wg_public_key_file.content | b64decode | trim }}"
+      when: wg_public_key_file is succeeded
+
+    - name: Display deployment summary
+      debug:
+        msg:
+          - "╔══════════════════════════════════════════════════════════════════╗"
+          - "║           Azure WireGuard Tunnel - Deployment Complete!          ║"
+          - "╚══════════════════════════════════════════════════════════════════╝"
+          - ""
+          - "══════════════════════════════════════════════════════════════════"
+          - "NEXT STEPS - Configure your home network"
+          - "══════════════════════════════════════════════════════════════════"
+          - ""
+          - "1. Copy the Azure WireGuard public key below to your home config:"
+          - ""
+          - "   Azure WireGuard Public Key:"
+          - "   {{ azure_wg_public_key | default('(key generation failed - check /etc/wireguard/publickey)') }}"
+          - ""
+          - "2. Update your home WireGuard config:"
+          - "   [Peer]"
+          - "   PublicKey = {{ azure_wg_public_key | default('<AZURE_PUBLIC_KEY>') }}"
+          - "   Endpoint = {{ ansible_host }}:{{ wireguard.port }}"
+          - "   AllowedIPs = {{ wireguard.server_ip }}/32"
+          - "   PersistentKeepalive = 25"
+          - ""
+          - "3. Sync SSL certificates to Azure:"
+          - "   ./scripts/sync-certs.sh"
+          - ""
+          - "4. Validate deployment:"
+          - "   ./scripts/validate.sh"
+          - ""
+          - "══════════════════════════════════════════════════════════════════"
+          - "DEPLOYMENT DETAILS"
+          - "══════════════════════════════════════════════════════════════════"
+          - ""
+          - "Domain:              {{ domain.name }}"
+          - "VM IP:               {{ ansible_host }}"
+          - "WireGuard Endpoint:  {{ ansible_host }}:{{ wireguard.port }}"
+          - "WireGuard Tunnel IP: {{ wireguard.server_ip }}"
+          - "Bandwidth Monitor:   {{ 'ENABLED' if bandwidth_monitor.enabled | default(false) | bool else 'DISABLED' }}"
+          - ""
+          - "══════════════════════════════════════════════════════════════════"
+          - "SERVICE STATUS COMMANDS"
+          - "══════════════════════════════════════════════════════════════════"
+          - ""
+          - "WireGuard:    sudo wg show"
+          - "Caddy:        sudo systemctl status caddy"
+          - "DNS Updater:  sudo systemctl status dns-update.service"
+          - "Cert Sync:    sudo systemctl status certsync-watcher.path"
+          - "Fail2ban:     sudo fail2ban-client status"
+
+    - name: Display bandwidth monitor info (if enabled)
+      debug:
+        msg:
+          - ""
+          - "══════════════════════════════════════════════════════════════════"
+          - "BANDWIDTH MONITOR (Enabled)"
+          - "══════════════════════════════════════════════════════════════════"
+          - ""
+          - "Status:       sudo {{ bandwidth_monitor_dir }}/monitor-costs.py status"
+          - "Timer:        sudo systemctl status bandwidth-monitor.timer"
+          - "Logs:         sudo tail -f {{ bandwidth_monitor_log }}"
+          - ""
+          - "Current tier: {{ bandwidth_tier | default('unknown') }}"
+          - "Budget name:  {{ bandwidth_monitor.azure_budget_name }}"
+      when: bandwidth_monitor.enabled | default(false) | bool

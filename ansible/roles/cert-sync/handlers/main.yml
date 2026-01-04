@@ -1,0 +1,11 @@
+---
+# Certificate Sync Role - Handlers
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart sshd
+  systemd:
+    name: sshd
+    state: restarted

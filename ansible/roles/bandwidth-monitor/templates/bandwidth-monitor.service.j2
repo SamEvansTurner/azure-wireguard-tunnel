@@ -1,0 +1,25 @@
+[Unit]
+Description=Azure Bandwidth Monitor Service
+Documentation=https://github.com/SamEvansTurner/azure-wireguard-tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ bandwidth_monitor_dir }}/venv/bin/python3 {{ bandwidth_monitor_dir }}/monitor-costs.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bandwidth-monitor
+
+# Security hardening
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths={{ bandwidth_monitor_state | dirname }} {{ bandwidth_monitor_log | dirname }}
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

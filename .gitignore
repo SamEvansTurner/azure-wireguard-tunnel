@@ -7,10 +7,14 @@ terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
 *.tfvars
 !terraform.tfvars.example
+!config.yml.example
 
-# Azure Configuration Templates (local only)
-azure-configs/
-!azure-configs.example/
+# User Configuration (single source of truth)
+config.yml
+
+# Ansible auto-generated inventory
+ansible/inventory/azure.yml
+
 
 # Home config local files
 Caddyfile

@@ -1,0 +1,16 @@
+[Unit]
+Description=Azure Bandwidth Monitor Timer (Hourly)
+Documentation=https://github.com/SamEvansTurner/azure-wireguard-tunnel
+
+[Timer]
+# Run hourly on the hour
+OnCalendar=hourly
+# Run 5 minutes after boot
+OnBootSec=5min
+# If the system was off when a check was scheduled, run it when the system comes back up
+Persistent=true
+# Randomize execution by up to 5 minutes to avoid thundering herd
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

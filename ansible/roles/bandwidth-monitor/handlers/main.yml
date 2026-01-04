@@ -1,0 +1,18 @@
+---
+# Bandwidth Monitor Role - Handlers
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart bandwidth-monitor timer
+  systemd:
+    name: bandwidth-monitor.timer
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+
+- name: restart bandwidth-monitor service
+  systemd:
+    name: bandwidth-monitor.service
+    state: restarted

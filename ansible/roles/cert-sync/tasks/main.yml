@@ -1,0 +1,87 @@
+---
+# Certificate Sync Role - Automatic Certificate Processing
+
+- name: Create certsync user
+  user:
+    name: "{{ certsync_user }}"
+    system: yes
+    shell: /usr/sbin/nologin
+    comment: "Certificate Sync User"
+    create_home: yes
+    state: present
+
+- name: Deploy certsync SFTP-only SSH configuration
+  template:
+    src: certsync-sftp.conf.j2
+    dest: /etc/ssh/sshd_config.d/80-certsync-sftp.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: '/usr/sbin/sshd -t -f %s'
+  notify: restart sshd
+
+- name: Ensure certsync directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ certsync_user }}"
+    group: "{{ certsync_user }}"
+    mode: '0700'
+  loop:
+    - "{{ certsync_incoming_dir }}"
+
+- name: Create certificate backup directory
+  file:
+    path: "{{ certsync_certs_dir }}/backup"
+    state: directory
+    owner: "{{ caddy_user }}"
+    group: "{{ caddy_group }}"
+    mode: '0755'
+
+- name: Deploy certificate processing script
+  template:
+    src: process-certs.sh.j2
+    dest: /usr/local/bin/process-certs.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Deploy systemd path watcher
+  template:
+    src: certsync-watcher.path.j2
+    dest: /etc/systemd/system/certsync-watcher.path
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload systemd
+
+- name: Deploy systemd processor service
+  template:
+    src: certsync-processor.service.j2
+    dest: /etc/systemd/system/certsync-processor.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload systemd
+
+- name: Enable and start certsync watcher
+  systemd:
+    name: certsync-watcher.path
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Display cert-sync info
+  debug:
+    msg:
+      - "Certificate sync configured"
+      - "Upload directory: {{ certsync_incoming_dir }}"
+      - "Certificate directory: {{ certsync_certs_dir }}"
+      - "User: {{ certsync_user }} (SFTP-only)"
+      - ""
+      - "Systemd watcher monitors for uploads and auto-processes"
+      - "Certificates are validated before installation"
+      - "Old certificates are backed up automatically"
+      - ""
+      - "Check status: sudo systemctl status certsync-watcher.path"
+      - "View logs: sudo journalctl -u certsync-processor.service -f"

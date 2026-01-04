@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for certificate uploads
+Documentation=https://github.com/SamEvansTurner/azure-wireguard-tunnel
+
+[Path]
+PathChanged={{ certsync_incoming_dir }}
+Unit=certsync-processor.service
+
+[Install]
+WantedBy=multi-user.target

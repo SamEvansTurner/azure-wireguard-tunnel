@@ -1,0 +1,43 @@
+#!/bin/bash
+# DNS Update Script for deSEC
+# Managed by Ansible
+
+set -e
+
+# Get current public IP
+CURRENT_IP=$(curl -s --max-time 10 ifconfig.me || curl -s --max-time 10 icanhazip.com)
+
+if [ -z "$CURRENT_IP" ]; then
+  echo "Failed to get public IP"
+  exit 1
+fi
+
+# Extract domain parts
+DOMAIN="{{ domain.name }}"              # e.g., "svc.example.com"
+SUBDOMAIN="{{ domain.subdomain }}"             # e.g., "*"
+BASE_DOMAIN=$(echo "$DOMAIN" | rev | cut -d'.' -f1-2 | rev)  # e.g., "example.com"
+
+# Extract intermediate parts (everything except last 2 parts)
+# For "svc.example.com", this extracts "svc"
+# For "jellyfin.svc.example.com", this extracts "jellyfin.svc"
+INTERMEDIATE=$(echo "$DOMAIN" | rev | cut -d'.' -f3- | rev)
+
+# Combine subdomain with intermediate parts
+if [ -z "$INTERMEDIATE" ]; then
+  # No intermediate parts (domain is just "example.com")
+  FULL_SUBNAME="$SUBDOMAIN"
+else
+  # Has intermediate parts (domain is "svc.example.com" or deeper)
+  FULL_SUBNAME="$SUBDOMAIN.$INTERMEDIATE"
+fi
+
+# Update deSEC DNS
+# This creates: *.svc.example.com (subname="*.svc" on domain="example.com")
+curl -X PATCH "https://desec.io/api/v1/domains/$BASE_DOMAIN/rrsets/" \
+  -H "Authorization: Token {{ domain.desec_token }}" \
+  -H "Content-Type: application/json" \
+  -d "[{\"subname\": \"$FULL_SUBNAME\", \"type\": \"A\", \"records\": [\"$CURRENT_IP\"], \"ttl\": 3600}]"
+
+# Log the update
+logger "DNS updated: $FULL_SUBNAME.$BASE_DOMAIN -> $CURRENT_IP"
+echo "DNS updated: $FULL_SUBNAME.$BASE_DOMAIN -> $CURRENT_IP"
