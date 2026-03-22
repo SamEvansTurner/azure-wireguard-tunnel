@@ -164,11 +164,11 @@ rm -rf "$TMP_DIR"
 echo -e "${GREEN}✅ Certificates synced${NC}"
 echo ""
 
-# Reload Caddy
-echo -e "${YELLOW}Reloading Caddy...${NC}"
+# Restart Caddy (restart required because admin API is disabled)
+echo -e "${YELLOW}Restarting Caddy...${NC}"
 if ssh $ADMIN_USER@$VM_IP "sudo systemctl is-active caddy" &>/dev/null; then
-    ssh $ADMIN_USER@$VM_IP "sudo systemctl reload caddy"
-    echo -e "${GREEN}✅ Caddy reloaded${NC}"
+    ssh $ADMIN_USER@$VM_IP "sudo systemctl restart caddy"
+    echo -e "${GREEN}✅ Caddy restarted${NC}"
 else
     echo -e "${YELLOW}ℹ️  Caddy not running. Start with: systemctl start caddy${NC}"
 fi

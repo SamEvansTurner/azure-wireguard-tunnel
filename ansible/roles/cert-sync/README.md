@@ -8,7 +8,7 @@ The cert-sync role creates:
 - A restricted `certsync` user for SFTP-only access
 - A systemd path watcher that monitors for uploaded certificates
 - A processor service that validates and installs certificates
-- Automatic Caddy reload when certificates are updated
+- Automatic Caddy restart when certificates are updated
 
 ## How It Works
 
@@ -31,7 +31,7 @@ Home Server                    Azure VM
     |                    - Backs up existing certs
     |                    - Copies to /etc/caddy/certs/
     |                    - Sets correct permissions
-    |                    - Reloads Caddy
+    |                    - Restarts Caddy
     |                              |
     |                              v
     |                    Caddy serves with new certs
@@ -151,6 +151,6 @@ sudo systemctl start certsync-processor.service
    grep -r "tls" /etc/caddy/Caddyfile
    ```
 
-2. Manually reload Caddy:
+2. Manually restart Caddy (reload not supported with `admin off`):
    ```bash
-   sudo systemctl reload caddy
+   sudo systemctl restart caddy

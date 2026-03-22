@@ -357,6 +357,10 @@ main() {
                 action="ansible"
                 shift
                 ;;
+            --no-ansible)
+                action="noansible"
+                shift
+                ;;
             --destroy)
                 action="destroy"
                 shift
@@ -416,6 +420,14 @@ main() {
             setup_ssh_agent
             wait_for_ssh
             run_ansible
+            show_completion_info
+            ;;
+        noansible)
+            generate_tfvars
+            run_terraform apply
+            get_terraform_outputs
+            setup_ssh_agent
+            wait_for_ssh
             show_completion_info
             ;;
     esac

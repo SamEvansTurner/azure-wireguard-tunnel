@@ -67,13 +67,13 @@ chmod 600 "$CERT_DIR/$DOMAIN.key"
 
 logger -t "$LOG_TAG" "Certificates installed successfully"
 
-# Start or reload Caddy
+# Start or restart Caddy (restart required because admin API is disabled)
 if systemctl is-active --quiet caddy; then
-    logger -t "$LOG_TAG" "Reloading Caddy..."
-    if systemctl reload caddy; then
-        logger -t "$LOG_TAG" "Caddy reloaded successfully"
+    logger -t "$LOG_TAG" "Restarting Caddy..."
+    if systemctl restart caddy; then
+        logger -t "$LOG_TAG" "Caddy restarted successfully"
     else
-        logger -t "$LOG_TAG" "ERROR: Failed to reload Caddy"
+        logger -t "$LOG_TAG" "ERROR: Failed to restart Caddy"
         exit 1
     fi
 else

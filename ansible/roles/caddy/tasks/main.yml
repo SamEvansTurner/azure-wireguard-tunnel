@@ -72,7 +72,7 @@
     group: "{{ caddy_group }}"
     mode: '0644'
     validate: '/usr/bin/caddy validate --adapter caddyfile --config %s'
-  notify: reload caddy
+  notify: restart caddy
   when: caddy_cert_file.stat.exists
 
 - name: Deploy Caddyfile configuration (without validation - first run)
@@ -123,7 +123,7 @@
       - ""
       - "Check status: sudo systemctl status caddy"
       - "Validate config: sudo caddy validate --adapter caddyfile --config {{ caddy_config_dir }}/Caddyfile"
-      - "Reload config: sudo systemctl reload caddy"
+      - "Restart to apply config: sudo systemctl restart caddy"
   when: caddy_cert_file.stat.exists
 
 - name: Display Caddy info (waiting for certificates)
